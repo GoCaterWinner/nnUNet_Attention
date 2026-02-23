@@ -1,48 +1,34 @@
-from typing import Union, List, Tuple
+from typing import List, Tuple, Union
 
-from fontTools.misc.cython import returns
+import torch
 from torch import nn
+from torch._dynamo import OptimizedModule
 
-from nnunetv2.training.nnUNetTrainer.nnUNetTrainer import nnUNetTrainer
 from nnunetv2.training.my_archs.unet_art_block import UNetARTBlock
+from nnunetv2.training.nnUNetTrainer.nnUNetTrainer import nnUNetTrainer
+from nnunetv2.utilities.get_network_from_plans import get_network_from_plans
+
 
 class MyTrainer_Attention(nnUNetTrainer):
     """
-    先进行跑通占位，再进行修改
+    在 nnUNetTrainer 基础上，插入 ART 注意力模块的训练器。
+
+    关键思路（尽量保持与原框架接口对齐）：
+    1. 网络主干仍使用 plans 里定义的 nnU-Net 原生结构；
+    2. 在主干输出端增加 ART 细化层（UNetARTBlock 包装器）；
+    3. deep supervision 的开关仍走 nnU-Net 原有流程，保证 train/val/infer 一致。
     """
 
-    def __init__(self, plans, configuration, fold, dataset_json, unpack_dataset=True, device=None):
-        super().__init__(plans, configuration, fold, dataset_json, unpack_dataset, device)
-        self.enable_deep_supervision = False  # 总开关先关掉
-
-    def set_deep_supervision_enabled(self, enabled: bool):
-        # 不让父类去碰 self.network.decoder.deep_supervision
-        self.enable_deep_supervision = False
-
-    def _build_loss(self):
+    def __init__(self, plans, configuration, fold, dataset_json, unpack_dataset=True,
+                 device=torch.device("cuda")):
         """
-        不使用 DeepSupervisionWrapper，直接返回普通loss
+        注意：父类 nnUNetTrainer.__init__ 没有 unpack_dataset 参数。
+        这里保留该参数是为了兼容你已有代码习惯，但实际初始化时不向父类透传。
         """
-        if self.label_manager.has_regions:
-            # region-based（少见，先不动）
-            from nnunetv2.training.loss.compound_losses import DC_and_BCE_loss
-            loss = DC_and_BCE_loss(
-                {},
-                {'batch_dice': self.configuration_manager.batch_dice,
-                 'do_bg': True, 'smooth': 1e-5, 'ddp': self.is_ddp},
-                use_ignore_label=self.label_manager.ignore_label is not None,
-                dice_class=None
-            )
-        else:
-            loss = DC_and_CE_loss(
-                {'batch_dice': self.configuration_manager.batch_dice,
-                 'smooth': 1e-5, 'do_bg': False, 'ddp': self.is_ddp},
-                {},
-                weight_ce=1, weight_dice=1,
-                ignore_label=self.label_manager.ignore_label,
-                dice_class=None
-            )
-        return loss
+        super().__init__(plans, configuration, fold, dataset_json, device=device)
+        self.unpack_dataset = unpack_dataset
+        # 保持与 nnU-Net 默认行为一致：默认开启 deep supervision
+        self.enable_deep_supervision = True
 
     @staticmethod
     def build_network_architecture(architecture_class_name: str,
@@ -51,15 +37,47 @@ class MyTrainer_Attention(nnUNetTrainer):
                                    num_input_channels: int,
                                    num_output_channels: int,
                                    enable_deep_supervision: bool = True) -> nn.Module:
-        print("MyTrainer_Attention build_network_architecture called") # 确保函数正确调用
-        print("\n num_input_channels:", num_input_channels)
-        print("\n num_output_channels:", num_output_channels)
-        print("\n enable_deep_supervision:", enable_deep_supervision)
-        print("\n (ignored) architecture_class_name:", architecture_class_name)
-        print("\n (ignored) arch_init_kwargs keys:", list(arch_init_kwargs.keys()))
+        """
+        这是 nnU-Net 在训练和推理时都会调用的建网入口。
+        这里必须严格对齐签名，否则 `nnUNetv2_train ... -tr MyTrainer_Attention` 会找得到类但跑不起来。
+        """
+        # 1) 先按 plans 构建原生 nnU-Net 主干，确保 2D/3D、通道数、stage 配置全部沿用官方逻辑
+        backbone = get_network_from_plans(
+            architecture_class_name,
+            arch_init_kwargs,
+            arch_init_kwargs_req_import,
+            num_input_channels,
+            num_output_channels,
+            allow_init=True,
+            deep_supervision=enable_deep_supervision
+        )
+        # 2) 再把 ART 模块以“包装器”的方式缝在输出端，做到低侵入接入
+        network = UNetARTBlock(
+            backbone=backbone,
+            num_classes=num_output_channels,
+            deep_supervision=enable_deep_supervision
+        )
+        return network
 
-        # 先显性修改函数签名，强制关键deep_supervision
-        net = UNetARTBlock(input_channels=num_input_channels,num_class=num_output_channels,deep_supervision=False,**arch_init_kwargs)
+    def set_deep_supervision_enabled(self, enabled: bool):
+        """
+        覆盖父类的 deep supervision 开关逻辑，适配“包装网络”的层级结构。
 
-        return net
+        为什么要重写：
+        - 父类默认写法会直接访问 `network.decoder.deep_supervision`；
+        - 我们现在的网络是 `UNetARTBlock(backbone)`，需要同步两层：
+          1) 包装层自己的 decoder.deep_supervision
+          2) 内部 backbone.decoder.deep_supervision
+        """
+        if self.is_ddp:
+            mod = self.network.module
+        else:
+            mod = self.network
+        if isinstance(mod, OptimizedModule):
+            mod = mod._orig_mod
 
+        if hasattr(mod, "set_deep_supervision"):
+            mod.set_deep_supervision(enabled)
+        elif hasattr(mod, "decoder") and hasattr(mod.decoder, "deep_supervision"):
+            # 兜底逻辑：如果未来替换成其他网络，至少不至于直接崩
+            mod.decoder.deep_supervision = enabled

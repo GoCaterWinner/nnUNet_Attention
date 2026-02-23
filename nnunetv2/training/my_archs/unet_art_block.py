@@ -1,49 +1,92 @@
 import torch
 import torch.nn as nn
-from .art_block import  ART_block
 
 
 class _DecoderShim:
-    def __init__(self, deep_supervision=True):
+    """
+    给自定义网络提供一个和 nnU-Net 默认网络一致的 `decoder.deep_supervision` 入口。
+    这样 Trainer 在切换 train/val 模式时，不会因为找不到该属性而报错。
+    """
+    def __init__(self, deep_supervision: bool = True):
         self.deep_supervision = deep_supervision
+
+
+class ARTRefineBlock(nn.Module):
+    """
+    一个轻量版 ART 风格注意力细化块（支持 2D/3D）。
+
+    设计目标：
+    1. 尽量不改动 nnU-Net 主干网络，只在输出端做“缝合”；
+    2. 参数量可控，避免显著拖慢训练；
+    3. 既能处理最终输出，也能处理 deep supervision 的多尺度输出。
+    """
+    def __init__(self, channels: int, is_3d: bool):
+        super().__init__()
+        conv = nn.Conv3d if is_3d else nn.Conv2d
+        norm = nn.InstanceNorm3d if is_3d else nn.InstanceNorm2d
+        hidden = max(8, channels * 2)
+
+        # 先做通道投影，再计算注意力门控，最后残差回加到原 logits
+        self.pre = conv(channels, hidden, kernel_size=1, bias=True)
+        self.mix = conv(hidden, hidden, kernel_size=3, padding=1, bias=False)
+        self.norm = norm(hidden, affine=True)
+        self.act = nn.GELU()
+        self.gate = conv(hidden, channels, kernel_size=1, bias=True)
+        self.sigmoid = nn.Sigmoid()
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        attn = self.pre(x)
+        attn = self.mix(attn)
+        attn = self.norm(attn)
+        attn = self.act(attn)
+        attn = self.gate(attn)
+        attn = self.sigmoid(attn)
+        # 残差式细化：保留原预测，同时用注意力门控突出关键区域
+        return x + x * attn
+
 
 class UNetARTBlock(nn.Module):
     """
-    基础模块，ARTBlock，负责进行注意力计算等操作
-    - 输入: (B, input_channels, H, W) 或 (B, input_channels, D, H, W)
-    - 输出:
-        * deep_supervision=False -> Tensor (B, num_classes, ...)
-        * deep_supervision=True  -> list[Tensor], 第一个是最终输出，后面是辅助输出
-    nnU-Net 训练器会根据 deep_supervision 来决定 loss 怎么算，所以这里要配合它。
+    把 ART 细化块“包裹”到 nnU-Net 主干网络输出端的适配器。
+
+    接口约定：
+    - 输入：原始图像张量 x；
+    - 输出：
+      - 若主干开启 deep supervision：返回 list[Tensor]
+      - 否则：返回单个 Tensor
+    - Trainer 会通过 `decoder.deep_supervision` 来切换网络输出形式，
+      所以这里也提供同名入口并同步到底层主干网络。
     """
-    def __init__(self,input_channels:int,num_class:int,deep_supervision:bool = True,**kwargs):
+    def __init__(self, backbone: nn.Module, num_classes: int, deep_supervision: bool):
         super().__init__()
-        self.input_channels = input_channels
-        self.num_class = num_class
-        self.decoder = _DecoderShim(deep_supervision)
-        self.deep_supervision = False
+        self.backbone = backbone
+        self.num_classes = num_classes
 
-        # 2d模块，后续可以通过if语句来添加上3d的模块
-        self.stem = nn.Sequential(
-            nn.Conv2d(in_channels=input_channels,out_channels=32,kernel_size=3,padding=1),
-            nn.InstanceNorm2d(32,affine=True),
-            nn.ReLU(inplace=True),
-            nn.Conv2d(32,32,3,1,padding=1),
-            nn.ReLU(inplace=True),
-            nn.InstanceNorm2d(32)
-        )
+        # 与 nnU-Net 的约定保持一致：Trainer 会访问 self.network.decoder.deep_supervision
+        self.decoder = _DecoderShim(deep_supervision=deep_supervision)
 
-        self.head = nn.Conv2d(32,num_class,1)
-        self.aux_head = nn.Conv2d(32,num_class,1)
+        # 自动探测主干是 2D 还是 3D，避免写死 Conv2d 导致 3d_fullres 崩溃
+        is_3d = any(isinstance(m, nn.Conv3d) for m in self.backbone.modules())
+        self.refine = ARTRefineBlock(channels=num_classes, is_3d=is_3d)
+        self.set_deep_supervision(deep_supervision)
 
-    def forward(self,x):
-        if x.dim() != 4:
-            raise RuntimeError(
-                f"UNetArtBlock 的2d输入是（B，C，H，W)，但你给的是 shape={tuple(x.shape)}。"
-            )
-        feat = self.stem(x)
-        out = self.head(feat)
+    def set_deep_supervision(self, enabled: bool) -> None:
+        """
+        统一管理 deep supervision 开关：
+        - 更新包装层的 shim；
+        - 同步到底层主干（如果主干也有 decoder.deep_supervision）。
+        """
+        self.decoder.deep_supervision = enabled
+        if hasattr(self.backbone, "decoder") and hasattr(self.backbone.decoder, "deep_supervision"):
+            self.backbone.decoder.deep_supervision = enabled
 
-        return out
+    def _refine_output(self, out):
+        if isinstance(out, (list, tuple)):
+            # deep supervision 场景：每个尺度的 logits 都做一次 ART 细化
+            return [self.refine(o) for o in out]
+        return self.refine(out)
 
+    def forward(self, x: torch.Tensor):
+        out = self.backbone(x)
+        return self._refine_output(out)
 
