@@ -19,14 +19,20 @@ class MyTrainer_Attention(nnUNetTrainer):
     3. deep supervision 的开关仍走 nnU-Net 原有流程，保证 train/val/infer 一致。
     """
 
-    def __init__(self, plans, configuration, fold, dataset_json, unpack_dataset=True,
+    def __init__(self, plans, configuration, fold, dataset_json,
                  device=torch.device("cuda")):
         """
-        注意：父类 nnUNetTrainer.__init__ 没有 unpack_dataset 参数。
-        这里保留该参数是为了兼容你已有代码习惯，但实际初始化时不向父类透传。
+        这里的参数签名必须与父类 nnUNetTrainer.__init__ 对齐（至少不能多出父类没有的参数）。
+
+        原因：
+        - 父类 __init__ 内部会用 inspect.signature(self.__init__) 读取“当前子类”的签名；
+        - 然后按参数名从父类 __init__ 的 locals() 里逐个取值保存；
+        - 如果子类多了一个参数（例如 unpack_dataset），父类 locals() 里没有这个名字，就会在
+          nnUNetTrainer.py:112 的 locals()[k] 处触发 KeyError。
+
+        所以这里严格保持与 run_training.py 的实例化调用一致，避免接口不对齐导致初始化失败。
         """
         super().__init__(plans, configuration, fold, dataset_json, device=device)
-        self.unpack_dataset = unpack_dataset
         # 保持与 nnU-Net 默认行为一致：默认开启 deep supervision
         self.enable_deep_supervision = True
 
