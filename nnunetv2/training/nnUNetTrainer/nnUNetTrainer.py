@@ -65,6 +65,7 @@ from nnunetv2.utilities.get_network_from_plans import get_network_from_plans
 from nnunetv2.utilities.helpers import empty_cache, dummy_context
 from nnunetv2.utilities.label_handling.label_handling import convert_labelmap_to_one_hot, determine_num_input_channels
 from nnunetv2.utilities.plans_handling.plans_handler import PlansManager
+from nnunetv2.utilities.ccc_metric import compute_ccc
 
 
 class nnUNetTrainer(object):
@@ -1081,13 +1082,22 @@ class nnUNetTrainer(object):
             fp_hard = fp_hard[1:]
             fn_hard = fn_hard[1:]
 
-        return {'loss': l.detach().cpu().numpy(), 'tp_hard': tp_hard, 'fp_hard': fp_hard, 'fn_hard': fn_hard}
+        # ---- 新增：计算体素体积用于 CCC ----
+        vol_pred = (tp_hard + fp_hard)   # shape: (num_fg_classes,)
+        vol_ref  = (tp_hard + fn_hard)   # shape: (num_fg_classes,)
+
+        return {'loss': l.detach().cpu().numpy(), 'tp_hard': tp_hard, 'fp_hard': fp_hard, 'fn_hard': fn_hard,
+                'vol_pred': vol_pred, 'vol_ref': vol_ref}
 
     def on_validation_epoch_end(self, val_outputs: List[dict]):
         outputs_collated = collate_outputs(val_outputs)
         tp = np.sum(outputs_collated['tp_hard'], 0)
         fp = np.sum(outputs_collated['fp_hard'], 0)
         fn = np.sum(outputs_collated['fn_hard'], 0)
+
+        # 收集体积数组用于 CCC
+        all_vol_pred = np.array(outputs_collated['vol_pred'])
+        all_vol_ref  = np.array(outputs_collated['vol_ref'])
 
         if self.is_ddp:
             world_size = dist.get_world_size()
@@ -1107,6 +1117,14 @@ class nnUNetTrainer(object):
             losses_val = [None for _ in range(world_size)]
             dist.all_gather_object(losses_val, outputs_collated['loss'])
             loss_here = np.vstack(losses_val).mean()
+
+            vp_list = [None for _ in range(world_size)]
+            dist.all_gather_object(vp_list, all_vol_pred)
+            all_vol_pred = np.vstack(vp_list)
+
+            vr_list = [None for _ in range(world_size)]
+            dist.all_gather_object(vr_list, all_vol_ref)
+            all_vol_ref = np.vstack(vr_list)
         else:
             loss_here = np.mean(outputs_collated['loss'])
 
@@ -1115,6 +1133,16 @@ class nnUNetTrainer(object):
         self.logger.log('mean_fg_dice', mean_fg_dice, self.current_epoch)
         self.logger.log('dice_per_class_or_region', global_dc_per_class, self.current_epoch)
         self.logger.log('val_losses', loss_here, self.current_epoch)
+
+        # ---- CCC（新增）----
+        num_fg_classes = all_vol_pred.shape[1] if all_vol_pred.ndim == 2 else 1
+        ccc_per_class = []
+        for c in range(num_fg_classes):
+            vp_c = all_vol_pred[:, c] if all_vol_pred.ndim == 2 else all_vol_pred
+            vr_c = all_vol_ref[:, c]  if all_vol_ref.ndim == 2  else all_vol_ref
+            ccc_per_class.append(compute_ccc(vr_c, vp_c))
+        mean_ccc = float(np.nanmean(ccc_per_class))
+        self.logger.log('val_ccc', mean_ccc, self.current_epoch)
 
     def on_epoch_start(self):
         self.logger.log('epoch_start_timestamps', time(), self.current_epoch)
@@ -1126,6 +1154,10 @@ class nnUNetTrainer(object):
         self.print_to_log_file('val_loss', np.round(self.logger.my_fantastic_logging['val_losses'][-1], decimals=4))
         self.print_to_log_file('Pseudo dice', [np.round(i, decimals=4) for i in
                                                self.logger.my_fantastic_logging['dice_per_class_or_region'][-1]])
+        # ---- 新增：打印 CCC ----
+        val_ccc = self.logger.my_fantastic_logging['val_ccc'][-1]
+        self.print_to_log_file(f'Pseudo CCC (volume accuracy): {np.round(val_ccc, decimals=4)}   '
+                               f'[CCC close to 1.0 = better volume prediction]')
         self.print_to_log_file(
             f"Epoch time: {np.round(self.logger.my_fantastic_logging['epoch_end_timestamps'][-1] - self.logger.my_fantastic_logging['epoch_start_timestamps'][-1], decimals=2)} s")
 
