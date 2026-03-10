@@ -61,6 +61,8 @@ class MyTrainer_Attention(nnUNetTrainer):
                  网络预测 logits 如 (B, Class, H, W), 和真实标签 target (B, 1, H, W)）
         【输出】: nn.Module（例如 DC_and_CE_loss 对象，调用时返回 Scalar 标量损失值）
         """
+        from nnunetv2.training.loss.dice import MemoryEfficientSoftDiceLoss
+
         if self.label_manager.has_regions:
             # region-based（比如 BraTS 任务中的重叠区域，少见）
             from nnunetv2.training.loss.compound_losses import DC_and_BCE_loss
@@ -69,7 +71,7 @@ class MyTrainer_Attention(nnUNetTrainer):
                 {'batch_dice': self.configuration_manager.batch_dice,
                  'do_bg': True, 'smooth': 1e-5, 'ddp': self.is_ddp},
                 use_ignore_label=self.label_manager.ignore_label is not None,
-                dice_class=None
+                dice_class=MemoryEfficientSoftDiceLoss
             )
         else:
             # 绝大多数多分类任务走这里
@@ -80,7 +82,7 @@ class MyTrainer_Attention(nnUNetTrainer):
                 {},
                 weight_ce=1, weight_dice=1,  # 这里可以修改 CE 和 Dice 的权重比例
                 ignore_label=self.label_manager.ignore_label,
-                dice_class=None
+                dice_class=MemoryEfficientSoftDiceLoss
             )
         return loss
 
