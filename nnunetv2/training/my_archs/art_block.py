@@ -3,6 +3,18 @@ import torch.nn as nn
 from torch.nn.modules.utils import _pair
 
 class ART_block(nn.Module):
+    """
+    ART_block（Attention Residual Transformer Block）
+    功能描述：
+    结合 CNN 的局部特征提取与 Transformer 的全局注意力机制的复合模块。
+    通过下采样将特征图送入 Transformer 提取全局依赖，再将输出上采样后与残差 CNN 特征进行拼接融合。
+
+    【参数说明】:
+        - config: Transformer 和相关结构的超参数配置字典/对象。
+        - input_dim: 输入特征的维度大小。
+        - img_size: 输入图像/特征图的空间尺寸 (H, W)。
+        - transformer: 可选的 Transformer 实例，若提供则启用全局注意力分支。
+    """
     def __init__(self,config, input_dim, img_size,transformer = None):
         super(ART_block, self).__init__()
         self.transformer = transformer
@@ -47,6 +59,16 @@ class ART_block(nn.Module):
         setattr(self, 'residual_cnn', nn.Sequential(*model))
 
     def forward(self, x):
+        """
+        前向传播逻辑：
+
+        【输入 `x`】: 
+            Tensor, 形状为 (B, C, H, W)，其中 C 是当前特征图通道数。
+            
+        【输出】:
+            Tensor, 形状与输入几乎保持一致（由于经过残差CNN与Transformer融合），具体维度取决于各子模块的具体设计。
+            通常为 (B, C_out, H, W)。
+        """
         if self.transformer:
             # downsample
             down_sampled = self.downsample(x)
@@ -100,7 +122,11 @@ class ART_block(nn.Module):
 
 
 class Embeddings(nn.Module):
-    """Construct the embeddings from patch, position embeddings.
+    """
+    Embeddings 模块
+    功能描述：
+    为 Transformer 模型构建 Patch Embeddings 和 Position Embeddings。
+    将 2D 的特征图通过卷积切分为独立的 Patch 并展平为 1D 序列，同时加入位置编码以保留空间信息。
     """
     def __init__(self, config, img_size, in_channels=3,input_dim=3,old = 1):
         super(Embeddings, self).__init__()
@@ -122,6 +148,16 @@ class Embeddings(nn.Module):
 
 
     def forward(self, x):
+        """
+        前向传播逻辑：
+
+        【输入 `x`】:
+            Tensor, 形状通常为 (B, in_channels, H, W) (这是下采样后的特征图，例如通道数为1024)。
+            
+        【输出 `embeddings`】:
+            Tensor, 形状为 (B, n_patches, hidden_size)。
+            这些是由 2D 图转为 1D 序列并加入位置编码后的特征，可直接输入到 Transformer 中。
+        """
         x = self.patch_embeddings(x)
         x = x.flatten(2)
         x = x.transpose(-1, -2)
