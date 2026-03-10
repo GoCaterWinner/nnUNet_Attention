@@ -37,8 +37,9 @@ class MyTrainer_Attention(nnUNetTrainer):
     - CCC 会被记录到 logger 并打印到训练日志，便于监控脂肪分割的体积准确性。
     """
 
-    def __init__(self, plans, configuration, fold, dataset_json, unpack_dataset=True, device=None):
-        super().__init__(plans, configuration, fold, dataset_json, unpack_dataset, device)
+    def __init__(self, plans: dict, configuration: str, fold: int, dataset_json: dict,
+                 device: torch.device = torch.device('cuda')):
+        super().__init__(plans, configuration, fold, dataset_json, device)
         # 注意超参：深度监督(Deep Supervision)总开关先关掉，因为我们的自定义模块可能没做多尺度输出
         self.enable_deep_supervision = False
 
