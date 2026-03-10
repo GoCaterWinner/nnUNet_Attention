@@ -14,6 +14,7 @@ from nnunetv2.imageio.simpleitk_reader_writer import SimpleITKIO
 # the Evaluator class of the previous nnU-Net was great and all but man was it overengineered. Keep it simple
 from nnunetv2.utilities.json_export import recursive_fix_for_json_export
 from nnunetv2.utilities.plans_handling.plans_handler import PlansManager
+from nnunetv2.utilities.ccc_metric import compute_ccc
 
 
 def label_or_region_to_key(label_or_region: Union[int, Tuple[int]]):
@@ -115,6 +116,9 @@ def compute_metrics(reference_file: str, prediction_file: str, image_reader_writ
         results['metrics'][r]['TN'] = tn
         results['metrics'][r]['n_pred'] = fp + tp
         results['metrics'][r]['n_ref'] = fn + tp
+        # 体积（单位：体素），用于跨样本计算 CCC
+        results['metrics'][r]['Volume_pred'] = int(fp + tp)
+        results['metrics'][r]['Volume_ref'] = int(fn + tp)
     return results
 
 
@@ -154,6 +158,12 @@ def compute_metrics_on_folder(folder_ref: str, folder_pred: str, output_file: st
         for m in metric_list:
             means[r][m] = np.nanmean([i['metrics'][r][m] for i in results])
 
+    # ---- 计算每个类别的 CCC（体积一致性相关系数）----
+    for r in regions_or_labels:
+        vols_ref = np.array([i['metrics'][r]['Volume_ref'] for i in results], dtype=np.float64)
+        vols_pred = np.array([i['metrics'][r]['Volume_pred'] for i in results], dtype=np.float64)
+        means[r]['CCC'] = compute_ccc(vols_ref, vols_pred)
+
     # foreground mean
     foreground_mean = {}
     for m in metric_list:
@@ -164,6 +174,18 @@ def compute_metrics_on_folder(folder_ref: str, folder_pred: str, output_file: st
             values.append(means[k][m])
         foreground_mean[m] = np.mean(values)
 
+    # foreground_mean CCC：用所有前景类别合并的体积对计算一次全局 CCC
+    fg_vols_ref, fg_vols_pred = [], []
+    for r in regions_or_labels:
+        if r == 0 or r == '0':
+            continue
+        fg_vols_ref.extend([i['metrics'][r]['Volume_ref'] for i in results])
+        fg_vols_pred.extend([i['metrics'][r]['Volume_pred'] for i in results])
+    foreground_mean['CCC'] = compute_ccc(
+        np.array(fg_vols_ref, dtype=np.float64),
+        np.array(fg_vols_pred, dtype=np.float64)
+    )
+
     [recursive_fix_for_json_export(i) for i in results]
     recursive_fix_for_json_export(means)
     recursive_fix_for_json_export(foreground_mean)
@@ -171,7 +193,6 @@ def compute_metrics_on_folder(folder_ref: str, folder_pred: str, output_file: st
     if output_file is not None:
         save_summary_json(result, output_file)
     return result
-    # print('DONE')
 
 
 def compute_metrics_on_folder2(folder_ref: str, folder_pred: str, dataset_json_file: str, plans_file: str,
