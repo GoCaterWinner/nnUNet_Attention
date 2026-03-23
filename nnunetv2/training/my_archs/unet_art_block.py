@@ -7,6 +7,7 @@ class _DecoderShim:
     """
     nnU-Net 的训练脚本有时会试图访问 `network.decoder.deep_supervision`，
     为了防止其因为找不到属性而报错，我们在这里加上一个兼容垫片(Shim)。
+    这东西一定要留着，不然到时候网络接口没办法对齐
     """
     def __init__(self, deep_supervision=True):
         self.deep_supervision = deep_supervision
@@ -27,6 +28,8 @@ class UNetARTBlock(nn.Module):
     - deep_supervision=False -> 必须返回单一 Tensor (B, num_classes, ...)
     - deep_supervision=True  -> 必须返回 list[Tensor] ! 第一个是最高分辨率最终输出，后面依次是降采样后的辅助特征图输出。
     由于目前我们在 Trainer 里强行关闭了 DS，这里直接返回单个 Tensor 即可。
+    这个**kwargs就负责接收前面的那些参数的，如果有需要的，是可以用上的。
+    num_class负责看你最终需要输出几类。比如脂肪分割，最后输出的是2.
     """
     def __init__(self,input_channels:int,num_class:int,deep_supervision:bool = True,**kwargs):
         super().__init__()

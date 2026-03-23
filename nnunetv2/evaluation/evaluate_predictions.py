@@ -15,6 +15,7 @@ from nnunetv2.imageio.simpleitk_reader_writer import SimpleITKIO
 from nnunetv2.utilities.json_export import recursive_fix_for_json_export
 from nnunetv2.utilities.plans_handling.plans_handler import PlansManager
 from nnunetv2.utilities.ccc_metric import compute_ccc
+from nnunetv2.utilities.hd95_metric import compute_hd95
 
 
 def label_or_region_to_key(label_or_region: Union[int, Tuple[int]]):
@@ -99,10 +100,15 @@ def compute_metrics(reference_file: str, prediction_file: str, image_reader_writ
     results['reference_file'] = reference_file
     results['prediction_file'] = prediction_file
     results['metrics'] = {}
+    spacing = seg_ref_dict['spacing']
     for r in labels_or_regions:
         results['metrics'][r] = {}
         mask_ref = region_or_label_to_mask(seg_ref, r)
         mask_pred = region_or_label_to_mask(seg_pred, r)
+        if ignore_mask is not None:
+            valid_mask = ~ignore_mask
+            mask_ref = mask_ref & valid_mask
+            mask_pred = mask_pred & valid_mask
         tp, fp, fn, tn = compute_tp_fp_fn_tn(mask_ref, mask_pred, ignore_mask)
         if tp + fp + fn == 0:
             results['metrics'][r]['Dice'] = np.nan
@@ -110,6 +116,7 @@ def compute_metrics(reference_file: str, prediction_file: str, image_reader_writ
         else:
             results['metrics'][r]['Dice'] = 2 * tp / (2 * tp + fp + fn)
             results['metrics'][r]['IoU'] = tp / (tp + fp + fn)
+        results['metrics'][r]['HD95'] = compute_hd95(mask_ref, mask_pred, spacing)
         results['metrics'][r]['FP'] = fp
         results['metrics'][r]['TP'] = tp
         results['metrics'][r]['FN'] = fn

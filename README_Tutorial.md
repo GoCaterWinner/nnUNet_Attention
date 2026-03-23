@@ -1,95 +1,427 @@
-# nnU-Net 自定义模块添加 & 数据处理教程
+# nnU-Net 模型层二次开发教程
 
-本篇 README 是针对 nnU-Net 框架的保姆级教程，结合本仓库中的 `MyTrainer_Attention` 示例，详细拆解了 nnU-Net 如何添加自定义网络模块，以及它背后的复杂数据预处理逻辑和训练运行逻辑。
+这份教程专门面向你现在这条路子：
+
+- 数据处理层沿用 nnU-Net 原版，不动。
+- 模型层通过自定义 trainer 来接管。
+- 训练命令固定使用 `-tr MyTrainer_Attention`。
+
+也就是说，你真正要改的重点不是 dataloader、preprocess，而是：
+
+- `nnunetv2/training/nnUNetTrainer/trainer_attention.py`
+- `nnunetv2/training/my_archs/unet_art_block.py`
 
 ---
 
-## 1. nnU-Net 训练运行逻辑链路
+## 1. 当你执行 `nnUNetv2_train ... -tr MyTrainer_Attention` 时，函数链到底怎么走？
 
-当你敲下这行代码开始训练时：
+训练命令示例：
+
 ```bash
 nnUNetv2_train DATASET_ID 2d 0 -tr MyTrainer_Attention
 ```
 
-背后究竟发生了什么？请看下方的思维执行流程图：
+最核心的一句话先说清楚：
 
-```mermaid
-graph TD
-    A[输入: nnUNetv2_train -tr MyTrainer_Attention] --> B[1. run_training_entry 解析命令行参数]
-    B --> C[2. 加载 dataset.json 和 plans.json]
-    C --> D[3. 通过 Python 反射机制在 Trainer 目录下查找 \nMyTrainer_Attention 类并实例化]
-    D --> E[4. 执行 trainer.initialize\(\)]
-    E --> F[5. 调用 _build_loss\(\) \n配置损失函数]
-    E --> G[6. 调用 build_network_architecture\(\) \n注入你的 UNetARTBlock]
-    E --> H[7. 基于 plans 加载并配置 DataLoader]
-    F --> I[8. 执行 trainer.run_training\(\) 进入 Epoch 循环]
-    G --> I
-    H -->|输出: Batch数据 \n Image: (B, C, H, W) 或 (B, C, D, H, W) | I
-    I --> J[前向传播: 自定义网络模块 UNetARTBlock \n输入: DataLoader 输出的 Image Tensor \n输出: 预测的 Logits 例如 (B, Class, H, W)]
-    J --> K[Loss 计算模块 \n输入: Logits 和 Label 标注 \n输出: Loss 标量值 (Scalar)]
-    K --> L[反向传播 Backprop -> Checkpoint 保存]
+> `-tr MyTrainer_Attention` 不是随便写的字符串，它会被 nnU-Net 用来反射查找同名 trainer 类，然后实例化，并最终在 `train_step/validation_step` 里调用 `self.network(data)` 完成真正的模型前向传播。
+
+### 1.1 精确调用链
+
+```text
+nnUNetv2_train
+-> nnunetv2.run.run_training.run_training_entry()
+-> nnunetv2.run.run_training.run_training(...)
+-> nnunetv2.run.run_training.get_trainer_from_args(...)
+-> recursive_find_python_class(..., "MyTrainer_Attention", ...)
+-> 实例化 MyTrainer_Attention(plans, configuration, fold, dataset_json, device)
+-> maybe_load_checkpoint(...)
+-> nnunet_trainer.run_training()
+-> nnUNetTrainer.on_train_start()
+-> nnUNetTrainer.initialize()
+-> MyTrainer_Attention.build_network_architecture(...)
+-> MyTrainer_Attention._build_loss()
+-> nnUNetTrainer.get_dataloaders()
+-> epoch 循环
+-> nnUNetTrainer.train_step()
+-> output = self.network(data)
+-> loss = self.loss(output, target)
+-> nnUNetTrainer.validation_step() / MyTrainer_Attention.validation_step()
+-> MyTrainer_Attention.on_validation_epoch_end()
+-> MyTrainer_Attention.on_epoch_end()
+-> nnUNetTrainer.on_train_end()
+-> nnUNetTrainer.perform_actual_validation()
 ```
 
-核心结论：
-**所有的自定义修改，都可以通过继承 `nnUNetTrainer` 并重写对应的函数（如 `_build_loss` 和 `build_network_architecture`）来实现。**
+### 1.2 对应源码位置
 
----
+#### 第 1 步：命令行入口
 
-## 2. 如何在 `MyTrainer_Attention` 里面修改/添加模块？
+- 文件：`nnunetv2/run/run_training.py`
+- 函数：`run_training_entry()`
+- 作用：解析 `dataset_id / configuration / fold / -tr / -p / --val` 等命令行参数。
 
-### A. 架构替换核心点
-如果想要将原版的 nnU-Net 替换为含 Attention 或其他定制结构的模块，你需要在 `MyTrainer_Attention` 类中覆盖（Override）`build_network_architecture` 方法：
+#### 第 2 步：进入训练总调度
 
-- **实现机制**：在此函数内不调用 `super()` 的原本网络，而是直接 `return` 你的网络（见 `trainer_attention.py` 中的 `UNetARTBlock` 实例化）。
-- **必须接收的参数**：
-  - `num_input_channels`：由任务模态数决定。
-  - `num_output_channels`：由目标类别数决定。
+- 文件：`nnunetv2/run/run_training.py`
+- 函数：`run_training(...)`
+- 作用：决定单卡还是 DDP，决定是否继续训练、是否只验证、是否加载预训练权重。
 
-### B. 重点需要注意的超参数 (Hyperparameters)
-在你客制化模块时，以下超参数极易导致报错，请格外留心：
+#### 第 3 步：根据 `-tr MyTrainer_Attention` 找到你的 trainer
 
-1. **`enable_deep_supervision` (深度监督开关)**
-   - **默认行为**：nnU-Net 严格依赖深度监督（返回 `List[Tensor]` 而不是单一 `Tensor`），默认开启。
-   - **修改建议**：如果你的 Attention 分支没有设计多层次的输出，**必须在 `__init__` 中将 `self.enable_deep_supervision = False`**。同时建议重写 `set_deep_supervision_enabled` 强制返回 `False` 拦截父类修改。
-2. **`Loss Function` (损失函数组合)**
-   - 单层输出如果走进了带有深度监督包装器的 Loss 会导致维度报错。
-   - **修改建议**：重写 `_build_loss` 函数，手动返回 `DC_and_CE_loss`（Dice + Cross Entropy），不套 `DeepSupervisionWrapper`。
-   - **权重分配**：你可以在 `DC_and_CE_loss` 中自由调整 `weight_ce` 和 `weight_dice`。
-3. **`batch_dice`**
-   - 控制计算 Batch 层面的 Dice 还是单张 Image 层面的 Dice。默认开启 `batch_dice` 可以让小目标的训练更稳定。
+- 文件：`nnunetv2/run/run_training.py`
+- 函数：`get_trainer_from_args(...)`
+- 关键动作：
+  - 调用 `recursive_find_python_class(...)`
+  - 在 `nnunetv2/training/nnUNetTrainer/` 目录下查找名字严格匹配的类
+  - 所以你命令里写的是 `MyTrainer_Attention`，类名也必须就是 `MyTrainer_Attention`
 
-### C. 网络输入输出形状
-- **输入维度**：nnU-Net 的 DataLoader 给的 `x`，在 2D 任务中是 `(B, C, H, W)`，在 3D 任务中是 `(B, C, D, H, W)`，务必确保你的 Attention 模块适配对应维度（可通过 kwargs 传入的 plan 信息动态构建 2D/3D Conv 算子）。
-- **输出维度**：最终预测应当匹配 `(B, num_output_channels, 相关空间维度)`，且 **不需要** 在末尾加 Softmax/Sigmoid，Loss 内部或预测时会自动处理 logits。
+#### 第 4 步：加载 plans 和 dataset.json
 
----
+- 同样在 `get_trainer_from_args(...)` 中完成
+- 会读取：
+  - `nnUNet_preprocessed/<DatasetName>/<plans_identifier>.json`
+  - `nnUNet_preprocessed/<DatasetName>/dataset.json`
 
-## 3. nnU-Net 复杂的数据预处理流程解析
+这些信息会被传给你的 trainer：
 
-nnU-Net 强大霸道的地方在于它“自适应”的预处理。从你按标准格式准备好 `raw` 数据，到可以训练，它完整执行了三步：
-
-```mermaid
-graph TD
-    A[输入: nnUNet_raw 原始 NIfTI/PNG 图像和标签 \n (Image: 各种未经处理的异常尺寸与物理间距)] --> B[1. nnUNetv2_extract_fingerprint]
-    B -->|输出: dataset_fingerprint.json \n(包含 Spacing, 灰度均值, 极值等物理指纹)| C[2. nnUNetv2_plan_experiment]
-    C -->|输出: nnUNetPlans.json \n(包含目标 Patch Size, Batch Size 等极苛刻的最佳配置)| D[3. nnUNetv2_preprocess \n根据计划执行并行处理]
-    D --> E[Resampling: 统一物理层面的 Target Spacing]
-    E --> F[Cropping: 裁剪图像全零/无用背景区]
-    F --> G[Normalization: 对 CT 做 Z-Score, 对 MRI 做 MinMax 等]
-    G -->|输出: 高度对齐的 Numpy 张量数据 .npz \n与相关元属性文件 .pkl| H[存入 nnUNet_preprocessed 对应架构文件夹]
-    H --> I[nnUNetv2_train DataLoader \n读取高密度 .npz 从而跳过 I/O 瓶颈]
+```python
+MyTrainer_Attention(
+    plans=plans,
+    configuration=configuration,
+    fold=fold,
+    dataset_json=dataset_json,
+    device=device,
+)
 ```
 
-### 三大步骤详情：
-1. **提取指纹 (Extract Fingerprint)**:
-   - 系统读取你的所有原始图像，计算前景（非0区）的强度属性（Mean, Std, 0.5和99.5的百分位数）。如果是 CT 图像，它会自动识别并执行专门的强度裁剪。这决定了后期 Normalize 的参数。
-2. **实验规划 (Plan Experiment)**:
-   - 全篇最精彩的启发式规则（Heuristic Rules）所在。
-   - 算法会根据中位数 Spacing 设定目标分辨率。
-   - 然后计算 VRAM（显存）开销。计算当前给定网络构架在对应 Patch Size 需要的显存条目。若超出 8GB/12GB 限额，则先减缩 Batch Size，再减缩 Patch Size。如果仍然过载或图像极大，就会额外生成 `3d_lowres` 的级联(Cascade) Plans。
-3. **极速预处理 (Preprocess)**:
-   - 这是非常耗时的阶段。nnU-Net 使用三阶样条插值 (Spline 3rd order) 重采样图像，把形状和物理尺寸对齐，通过 Z-score 标准化强度（使用步骤1得出的 Mean 和 Std），并将结果压缩保存为 `.npz` 以突破训练时的 I/O 瓶颈。
+#### 第 5 步：实例化 trainer，但这时网络还没真正建出来
+
+实例化 `MyTrainer_Attention` 时，主要是在保存配置、路径、训练超参数、label manager 等状态。
+
+真正把网络构造出来，是在后面的：
+
+```python
+initialize()
+```
+
+#### 第 6 步：`initialize()` 才是模型初始化核心
+
+文件：`nnunetv2/training/nnUNetTrainer/nnUNetTrainer.py`
+
+调用顺序大致是：
+
+```text
+initialize()
+-> _set_batch_size_and_oversample()
+-> determine_num_input_channels(...)
+-> build_network_architecture(...)
+-> configure_optimizers()
+-> _build_loss()
+-> infer_dataset_class(...)
+```
+
+这里最重要的两个“可插拔接口”就是：
+
+- `build_network_architecture(...)`
+- `_build_loss()`
+
+也就是说：
+
+- 你要换模型结构，主要改 `build_network_architecture(...)`
+- 你要换 loss，主要改 `_build_loss()`
+
+#### 第 7 步：`on_train_start()` 才去构建 dataloader
+
+调用顺序：
+
+```text
+run_training()
+-> on_train_start()
+-> get_dataloaders()
+-> set_deep_supervision_enabled(...)
+```
+
+这一步说明一个很重要的事实：
+
+> nnU-Net 的数据处理链路和模型链路是分开的。你完全可以只改 trainer 和 network，而不碰 dataloader / preprocess。
+
+#### 第 8 步：真正的模型 forward 在哪？
+
+真正执行模型前向传播的地方，不在 `build_network_architecture(...)`，而是在：
+
+```python
+train_step()
+```
+
+和
+
+```python
+validation_step()
+```
+
+里面这句：
+
+```python
+output = self.network(data)
+```
+
+所以要分清两件事：
+
+- `build_network_architecture(...)`：负责“创建模型对象”
+- `self.network(data)`：负责“执行模型前向传播”
+
+#### 第 9 步：epoch 循环
+
+训练主循环在：
+
+- 文件：`nnunetv2/training/nnUNetTrainer/nnUNetTrainer.py`
+- 函数：`run_training()`
+
+流程是：
+
+```text
+for epoch in range(...):
+    on_epoch_start()
+    on_train_epoch_start()
+    多次 train_step()
+    on_train_epoch_end()
+    on_validation_epoch_start()
+    多次 validation_step()
+    on_validation_epoch_end()
+    on_epoch_end()
+```
+
+#### 第 10 步：训练结束后的真实验证
+
+训练完成后还会跑：
+
+```python
+perform_actual_validation()
+```
+
+这一步不是 patch 级的 online validation，而是更完整的滑窗推理导出和评估。
 
 ---
 
-> 🎉 **总结:** 在了解以上链路后，你现在可以从容地在 `MyTrainer_Attention` 这个壳子里开发你自创的网络，享受 nnU-Net 带来的数据处理红利和强大骨架！
+## 2. 你以后要改模块，应该改哪一层？
+
+这个问题非常关键。
+
+### 2.1 不建议改的数据层
+
+这些通常别动：
+
+- `nnUNetv2_extract_fingerprint`
+- `nnUNetv2_plan_experiment`
+- `nnUNetv2_preprocess`
+- `nnUNetTrainer.get_dataloaders()`
+- `nnunetv2/training/dataloading/*`
+
+因为这些是 nnU-Net 最值钱、最稳定的自动化资产。
+
+### 2.2 建议改的模型层
+
+你真正应该改的是这两层：
+
+#### A. trainer 层
+
+文件：
+
+- `nnunetv2/training/nnUNetTrainer/trainer_attention.py`
+
+职责：
+
+- 注册你的自定义 trainer
+- 决定构造哪一个网络
+- 决定 loss
+- 决定 deep supervision 开关
+- 决定 optimizer / lr scheduler
+- 决定是否记录额外指标
+
+#### B. network 层
+
+文件：
+
+- `nnunetv2/training/my_archs/unet_art_block.py`
+
+职责：
+
+- 真正定义网络结构
+- 真正往模型里加 `nn.Linear`、Attention、MLP、门控、分支、融合模块
+
+一句话总结：
+
+> trainer 决定“训练系统怎么组织”，network 决定“模型到底长什么样”。
+
+---
+
+## 3. `MyTrainer_Attention` 里最值得你改的接口
+
+### 3.1 `__init__(...)`
+
+用途：
+
+- 接收 plans、configuration、fold、dataset_json、device
+- 设置训练级超参数
+- 可以在这里修改一些 trainer 级别默认行为
+
+典型适合改：
+
+- `self.enable_deep_supervision`
+- `self.initial_lr`
+- `self.weight_decay`
+- `self.num_epochs`
+
+### 3.2 `build_network_architecture(...)`
+
+这是最重要的接口。
+
+用途：
+
+- 根据 nnU-Net 提供的配置参数，返回一个真正的 `nn.Module`
+
+你在这里做的事情通常是：
+
+- 不再使用默认网络
+- 直接 `return UNetARTBlock(...)`
+- 或者以后 `return YourOwnNet(...)`
+
+注意：
+
+- 这里是“造网络对象”
+- 不是“执行 forward”
+
+### 3.3 `_build_loss()`
+
+用途：
+
+- 决定训练时到底用哪个 loss
+
+如果你的网络不输出多尺度结果：
+
+- 建议关闭 deep supervision
+- 并返回普通的 `DC_and_CE_loss`
+- 不要再套 `DeepSupervisionWrapper`
+
+### 3.4 `set_deep_supervision_enabled(...)`
+
+用途：
+
+- 父类默认会尝试去改网络 decoder 上的 deep supervision 开关
+
+如果你的自定义网络没有 `decoder.deep_supervision` 这种结构：
+
+- 最安全的办法就是像现在这样重写它
+- 直接强制 `self.enable_deep_supervision = False`
+
+### 3.5 `configure_optimizers()`
+
+用途：
+
+- 决定 optimizer 和 lr scheduler
+
+以后如果你想改：
+
+- SGD -> Adam / AdamW
+- PolyLR -> CosineAnnealing / Warmup
+
+通常就在这个接口里处理。
+
+### 3.6 `train_step(...)`
+
+用途：
+
+- 执行一次训练迭代
+- 真正调用 `self.network(data)`
+- 真正执行 backward
+
+如果你只是改模型结构，一般不用改这里。
+
+### 3.7 `validation_step(...)`
+
+用途：
+
+- 执行一次验证迭代
+- 做 online metric 统计
+
+如果你要额外记录体积指标、分类指标、边界指标，可以重写这里。
+
+### 3.8 `on_validation_epoch_end(...)`
+
+用途：
+
+- 聚合整个 epoch 的验证结果
+- 记录到 logger
+
+你现在的 CCC 指标就是在这里做 epoch 级汇总的。
+
+---
+
+## 4. 什么时候该把 `nn.Linear` 写进 trainer，什么时候不该？
+
+结论先说：
+
+> `nn.Linear`、Attention block、MLP、特征融合层，这些都应该放在 network 文件里，而不是直接塞进 trainer 里。
+
+原因：
+
+- trainer 负责训练流程
+- network 负责模型计算图
+- `self.network(data)` 调的是 network 的 `forward(...)`
+
+所以推荐工作流是：
+
+1. 在 `unet_art_block.py` 里加你的模块。
+2. 在 `trainer_attention.py` 的 `build_network_architecture(...)` 中返回这个新网络。
+3. 如果输出形式变了，再同步修改 `_build_loss()` 和 `set_deep_supervision_enabled(...)`。
+
+---
+
+## 5. 数据预处理链为什么可以完全不动？
+
+因为 nnU-Net 已经帮你做掉了最复杂、最不想自己维护的那些事情：
+
+- 数据指纹提取
+- spacing 自适应
+- patch size 规划
+- batch size 规划
+- 强度归一化
+- 前景裁剪
+- 重采样
+- 训练时 patch 采样
+- 数据增强
+
+整个流程大致是：
+
+```text
+nnUNetv2_extract_fingerprint
+-> nnUNetv2_plan_experiment
+-> nnUNetv2_preprocess
+-> 生成 nnUNet_preprocessed 下的 plans / dataset / npz / pkl
+-> nnUNetv2_train 读取这些结果直接训练
+```
+
+所以你的最佳策略是：
+
+- 预处理层别碰
+- dataloader 层别碰
+- trainer 和 network 层精改
+
+---
+
+## 6. 你现在最该记住的三句话
+
+1. `-tr MyTrainer_Attention` 会让 nnU-Net 反射找到 `MyTrainer_Attention` 类并实例化。
+2. 真正模型被调用的地方是 `train_step/validation_step` 里的 `self.network(data)`。
+3. 你要加 `nn.Linear`、attention、分支，主要应该写在 network 文件里；trainer 负责把它接进 nnU-Net 训练系统。
+
+---
+
+## 7. 推荐你接下来的修改顺序
+
+1. 先看 `trainer_attention.py`，把接口意义彻底搞懂。
+2. 再看 `unet_art_block.py`，把你要加的模块放到真正的网络里。
+3. 如果你的输出不再是多尺度，就保持 `deep_supervision = False`。
+4. 如果输出头、类别数、loss 形式变化，再同步修改 `_build_loss()`。
+
+这套路线最稳，也最符合 nnU-Net 的设计哲学。

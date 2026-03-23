@@ -1358,6 +1358,10 @@ class nnUNetTrainer(object):
             self.print_to_log_file("Validation complete", also_print_to_console=True)
             self.print_to_log_file("Mean Validation Dice: ", (metrics['foreground_mean']["Dice"]),
                                    also_print_to_console=True)
+            self.print_to_log_file("Mean Validation CCC: ", (metrics['foreground_mean']["CCC"]),
+                                   also_print_to_console=True)
+            self.print_to_log_file("Mean Validation HD95: ", (metrics['foreground_mean']["HD95"]),
+                                   also_print_to_console=True)
 
         self.set_deep_supervision_enabled(True)
         compute_gaussian.cache_clear()

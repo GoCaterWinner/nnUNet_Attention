@@ -14,8 +14,9 @@ class nnUNetLogger(object):
 
     YOU MUST LOG EXACTLY ONE VALUE PER EPOCH FOR EACH OF THE LOGGING ITEMS! DONT FUCK IT UP
 
-    新增：val_ccc — 每个 epoch 验证集上的 CCC（体积一致性相关系数），
-    用于脂肪分割体积准确性的在线监控。
+    新增：
+    - val_ccc: 每个 epoch 验证集上的 pseudo CCC（体积一致性相关系数）
+    - val_hd95: 每个 epoch 验证集上的 pseudo HD95
     """
     def __init__(self, verbose: bool = False):
         self.my_fantastic_logging = {
@@ -29,6 +30,8 @@ class nnUNetLogger(object):
             'epoch_end_timestamps': list(),
             # ---- 新增：CCC（体积一致性相关系数），值域 [-1,1]，越接近 1 越好 ----
             'val_ccc': list(),
+            # ---- 新增：HD95（95% Hausdorff Distance），单位与 spacing 一致，越小越好 ----
+            'val_hd95': list(),
         }
         self.verbose = verbose
         # shut up, this logging is great
@@ -60,8 +63,8 @@ class nnUNetLogger(object):
         # we infer the epoch form our internal logging
         epoch = min([len(i) for i in self.my_fantastic_logging.values()]) - 1  # lists of epoch 0 have len 1
         sns.set(font_scale=2.5)
-        # 扩展为 4 个子图（原来 3 个，新增 CCC 子图）
-        fig, ax_all = plt.subplots(4, 1, figsize=(30, 72))
+        # 扩展为 5 个子图（Loss/Dice、耗时、学习率、CCC、HD95）
+        fig, ax_all = plt.subplots(5, 1, figsize=(30, 88))
 
         # 子图1：训练/验证 Loss + 伪 Dice
         ax = ax_all[0]
@@ -97,7 +100,7 @@ class nnUNetLogger(object):
         ax.set_ylabel("learning rate")
         ax.legend(loc=(0, 1))
 
-        # 子图4：CCC（体积一致性相关系数）—— 新增
+        # 子图4：CCC（体积一致性相关系数）
         ax = ax_all[3]
         ccc_values = self.my_fantastic_logging['val_ccc'][:epoch + 1]
         valid_ccc = [v for v in ccc_values if v is not None and not (isinstance(v, float) and v != v)]  # 过滤 None/nan
@@ -110,6 +113,17 @@ class nnUNetLogger(object):
         ax.legend(loc=(0, 1))
         ax.set_title("CCC: 体积一致性相关系数 (Concordance Correlation Coefficient)\n越接近1表示预测体积越准确")
 
+        # 子图5：HD95（95% Hausdorff Distance）
+        ax = ax_all[4]
+        hd95_values = self.my_fantastic_logging['val_hd95'][:epoch + 1]
+        valid_hd95 = [v for v in hd95_values if v is not None and not (isinstance(v, float) and v != v)]
+        if len(valid_hd95) > 0:
+            ax.plot(x_values[:len(hd95_values)], hd95_values, color='darkorange', ls='-', label="val HD95", linewidth=4)
+        ax.set_xlabel("epoch")
+        ax.set_ylabel("HD95")
+        ax.legend(loc=(0, 1))
+        ax.set_title("HD95: 95% Hausdorff Distance\n越接近0表示边界距离越小")
+
         plt.tight_layout()
 
         fig.savefig(join(output_folder, "progress.png"))
@@ -120,6 +134,8 @@ class nnUNetLogger(object):
 
     def load_checkpoint(self, checkpoint: dict):
         self.my_fantastic_logging = checkpoint
-        # 兼容旧版 checkpoint（没有 val_ccc 字段）
+        # 兼容旧版 checkpoint（没有 val_ccc/val_hd95 字段）
         if 'val_ccc' not in self.my_fantastic_logging:
             self.my_fantastic_logging['val_ccc'] = []
+        if 'val_hd95' not in self.my_fantastic_logging:
+            self.my_fantastic_logging['val_hd95'] = []
