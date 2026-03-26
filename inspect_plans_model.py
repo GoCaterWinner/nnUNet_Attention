@@ -1,5 +1,6 @@
 import argparse
 from pathlib import Path
+from pprint import pformat
 from typing import Optional, Sequence
 
 import torch
@@ -153,6 +154,114 @@ def export_fx_graph(network: torch.nn.Module, output_file: Path):
     output_file.write_text(str(traced.graph), encoding="utf-8")
 
 
+def make_plain_summary(
+    plans_path: Path,
+    dataset_json_path: Optional[Path],
+    trainer_name: str,
+    configuration_name: str,
+    configuration_manager,
+    num_input_channels: int,
+    num_output_channels: int,
+    enable_deep_supervision: bool,
+    network: torch.nn.Module,
+) -> str:
+    arch_kwargs_text = pformat(
+        configuration_manager.network_arch_init_kwargs,
+        sort_dicts=False,
+        width=100,
+    )
+    req_import_text = pformat(
+        configuration_manager.network_arch_init_kwargs_req_import,
+        sort_dicts=False,
+        width=100,
+    )
+
+    lines = [
+        "=" * 88,
+        "模型检查报告",
+        "=" * 88,
+        "",
+        "[基础信息]",
+        f"- plans 路径: {plans_path}",
+        f"- dataset.json 路径: {dataset_json_path if dataset_json_path is not None else '未提供'}",
+        f"- trainer: {trainer_name}",
+        f"- configuration: {configuration_name}",
+        f"- patch_size: {configuration_manager.patch_size}",
+        f"- spacing: {configuration_manager.spacing}",
+        f"- network_arch_class_name: {configuration_manager.network_arch_class_name}",
+        f"- num_input_channels: {num_input_channels}",
+        f"- num_output_channels: {num_output_channels}",
+        f"- enable_deep_supervision: {enable_deep_supervision}",
+        "",
+        "[network_arch_init_kwargs]",
+        arch_kwargs_text,
+        "",
+        "[network_arch_init_kwargs_req_import]",
+        req_import_text,
+        "",
+        "[模型结构]",
+        str(network),
+        "",
+    ]
+    return "\n".join(lines)
+
+
+def make_markdown_summary(
+    plans_path: Path,
+    dataset_json_path: Optional[Path],
+    trainer_name: str,
+    configuration_name: str,
+    configuration_manager,
+    num_input_channels: int,
+    num_output_channels: int,
+    enable_deep_supervision: bool,
+    network: torch.nn.Module,
+) -> str:
+    arch_kwargs_text = pformat(
+        configuration_manager.network_arch_init_kwargs,
+        sort_dicts=False,
+        width=100,
+    )
+    req_import_text = pformat(
+        configuration_manager.network_arch_init_kwargs_req_import,
+        sort_dicts=False,
+        width=100,
+    )
+
+    lines = [
+        "# 模型检查报告",
+        "",
+        "## 基础信息",
+        f"- plans 路径: `{plans_path}`",
+        f"- dataset.json 路径: `{dataset_json_path}`" if dataset_json_path is not None else "- dataset.json 路径: `未提供`",
+        f"- trainer: `{trainer_name}`",
+        f"- configuration: `{configuration_name}`",
+        f"- patch_size: `{configuration_manager.patch_size}`",
+        f"- spacing: `{configuration_manager.spacing}`",
+        f"- network_arch_class_name: `{configuration_manager.network_arch_class_name}`",
+        f"- num_input_channels: `{num_input_channels}`",
+        f"- num_output_channels: `{num_output_channels}`",
+        f"- enable_deep_supervision: `{enable_deep_supervision}`",
+        "",
+        "## network_arch_init_kwargs",
+        "```python",
+        arch_kwargs_text,
+        "```",
+        "",
+        "## network_arch_init_kwargs_req_import",
+        "```python",
+        req_import_text,
+        "```",
+        "",
+        "## 模型结构",
+        "```python",
+        str(network),
+        "```",
+        "",
+    ]
+    return "\n".join(lines)
+
+
 def main():
     args = parse_args()
 
@@ -206,35 +315,36 @@ def main():
     )
     maybe_mkdir_p(str(output_dir))
 
-    summary_lines = [
-        f"plans: {plans_path}",
-        f"dataset_json: {dataset_json_path if dataset_json_path is not None else 'not provided'}",
-        f"trainer: {args.trainer}",
-        f"configuration: {configuration_name}",
-        f"patch_size: {configuration_manager.patch_size}",
-        f"spacing: {configuration_manager.spacing}",
-        f"network_arch_class_name: {configuration_manager.network_arch_class_name}",
-        f"num_input_channels: {num_input_channels}",
-        f"num_output_channels: {num_output_channels}",
-        f"enable_deep_supervision: {enable_deep_supervision}",
-        "",
-        "network_arch_init_kwargs:",
-        str(configuration_manager.network_arch_init_kwargs),
-        "",
-        "network_arch_init_kwargs_req_import:",
-        str(configuration_manager.network_arch_init_kwargs_req_import),
-        "",
-        "model:",
-        str(network),
-        "",
-    ]
-
-    summary_text = "\n".join(summary_lines)
+    summary_text = make_plain_summary(
+        plans_path,
+        dataset_json_path,
+        args.trainer,
+        configuration_name,
+        configuration_manager,
+        num_input_channels,
+        num_output_channels,
+        enable_deep_supervision,
+        network,
+    )
+    summary_md = make_markdown_summary(
+        plans_path,
+        dataset_json_path,
+        args.trainer,
+        configuration_name,
+        configuration_manager,
+        num_input_channels,
+        num_output_channels,
+        enable_deep_supervision,
+        network,
+    )
     summary_file = output_dir / "model_summary.txt"
+    summary_md_file = output_dir / "model_summary.md"
     summary_file.write_text(summary_text, encoding="utf-8")
+    summary_md_file.write_text(summary_md, encoding="utf-8")
 
     print(summary_text)
     print(f"Saved model summary to: {summary_file}")
+    print(f"Saved markdown summary to: {summary_md_file}")
 
     if args.graph:
         dummy_input_shape = build_dummy_input_shape(
