@@ -1,15 +1,15 @@
-# nnU-Net 模型层二次开发教程
+# 如何修改nnU-Netv2的模型架构呢？
 
 这份教程专门面向你现在这条路子：
 
-- 数据处理层沿用 nnU-Net 原版，不动。
-- 模型层通过自定义 trainer 来接管。
+- 数据处理层沿用 nnU-Net 原版，不动。并且也不推荐改。
+- 模型层我们通过MyTrainer_Attention强制用我们的网络。
 - 训练命令固定使用 `-tr MyTrainer_Attention`。
 
 也就是说，你真正要改的重点不是 dataloader、preprocess，而是：
 
-- `nnunetv2/training/nnUNetTrainer/trainer_attention.py`
-- `nnunetv2/training/my_archs/unet_art_block.py`
+- `nnunetv2/training/nnUNetTrainer/trainer_attention.py` ——> 修改训练器
+- `nnunetv2/training/my_archs/Net.py` ——> 修改真正的模型，我给了一个很小很小的模型，你在上面改就行了。
 
 ---
 
@@ -18,38 +18,16 @@
 训练命令示例：
 
 ```bash
-nnUNetv2_train DATASET_ID 2d 0 -tr MyTrainer_Attention
+nnUNetv2_train DATASET_ID 3d_fullres 0 -tr MyTrainer_Attention
 ```
+稍微解释一下这个指令的意思。
+> 我执行训练指令，dataset的名字，执行的配置是3d_fullres,fold选择只做第0个，然后选择的模型是自己创造的MyTrainer_Attention。
 
-最核心的一句话先说清楚：
 
-> `-tr MyTrainer_Attention` 不是随便写的字符串，它会被 nnU-Net 用来反射查找同名 trainer 类，然后实例化，并最终在 `train_step/validation_step` 里调用 `self.network(data)` 完成真正的模型前向传播。
-
-### 1.1 精确调用链
+### 1.1 我们输入指令，这个模型到底怎么运行的？
 
 ```text
-nnUNetv2_train
--> nnunetv2.run.run_training.run_training_entry()
--> nnunetv2.run.run_training.run_training(...)
--> nnunetv2.run.run_training.get_trainer_from_args(...)
--> recursive_find_python_class(..., "MyTrainer_Attention", ...)
--> 实例化 MyTrainer_Attention(plans, configuration, fold, dataset_json, device)
--> maybe_load_checkpoint(...)
--> nnunet_trainer.run_training()
--> nnUNetTrainer.on_train_start()
--> nnUNetTrainer.initialize()
--> MyTrainer_Attention.build_network_architecture(...)
--> MyTrainer_Attention._build_loss()
--> nnUNetTrainer.get_dataloaders()
--> epoch 循环
--> nnUNetTrainer.train_step()
--> output = self.network(data)
--> loss = self.loss(output, target)
--> nnUNetTrainer.validation_step() / MyTrainer_Attention.validation_step()
--> MyTrainer_Attention.on_validation_epoch_end()
--> MyTrainer_Attention.on_epoch_end()
--> nnUNetTrainer.on_train_end()
--> nnUNetTrainer.perform_actual_validation()
+当你执行nnUNetv2_train这条指令的时候，你可以看到pyproject.toml文件中写了具体的调用链条。
 ```
 
 ### 1.2 对应源码位置
@@ -391,15 +369,6 @@ perform_actual_validation()
 - 训练时 patch 采样
 - 数据增强
 
-整个流程大致是：
-
-```text
-nnUNetv2_extract_fingerprint
--> nnUNetv2_plan_experiment
--> nnUNetv2_preprocess
--> 生成 nnUNet_preprocessed 下的 plans / dataset / npz / pkl
--> nnUNetv2_train 读取这些结果直接训练
-```
 
 所以你的最佳策略是：
 
@@ -409,11 +378,10 @@ nnUNetv2_extract_fingerprint
 
 ---
 
-## 6. 你现在最该记住的三句话
+## 6. 你应该做的
 
-1. `-tr MyTrainer_Attention` 会让 nnU-Net 反射找到 `MyTrainer_Attention` 类并实例化。
-2. 真正模型被调用的地方是 `train_step/validation_step` 里的 `self.network(data)`。
-3. 你要加 `nn.Linear`、attention、分支，主要应该写在 network 文件里；trainer 负责把它接进 nnU-Net 训练系统。
+1. 找到`nnunetv2.run.training.nnUNetTrainer.trainer_attention.py。
+2. 我在里面写了很详细怎么改，你看到就知道大概怎么改啦。
 
 ---
 
@@ -421,7 +389,5 @@ nnUNetv2_extract_fingerprint
 
 1. 先看 `trainer_attention.py`，把接口意义彻底搞懂。
 2. 再看 `unet_art_block.py`，把你要加的模块放到真正的网络里。
-3. 如果你的输出不再是多尺度，就保持 `deep_supervision = False`。
-4. 如果输出头、类别数、loss 形式变化，再同步修改 `_build_loss()`。
 
 这套路线最稳，也最符合 nnU-Net 的设计哲学。

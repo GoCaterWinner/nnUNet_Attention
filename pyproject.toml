@@ -58,11 +58,14 @@ dependencies = [
 homepage = "https://github.com/MIC-DKFZ/nnUNet"
 repository = "https://github.com/MIC-DKFZ/nnUNet"
 
+
 [project.scripts]
 nnUNetv2_plan_and_preprocess = "nnunetv2.experiment_planning.plan_and_preprocess_entrypoints:plan_and_preprocess_entry"
 nnUNetv2_extract_fingerprint = "nnunetv2.experiment_planning.plan_and_preprocess_entrypoints:extract_fingerprint_entry"
 nnUNetv2_plan_experiment = "nnunetv2.experiment_planning.plan_and_preprocess_entrypoints:plan_experiment_entry"
 nnUNetv2_preprocess = "nnunetv2.experiment_planning.plan_and_preprocess_entrypoints:preprocess_entry"
+
+# 在这里！project.scripts是那种脚本命令，意思就是我输入nnUNetv2_train，就会自动执行后面的函数，我们找到这个run_training_entry
 nnUNetv2_train = "nnunetv2.run.run_training:run_training_entry"
 nnUNetv2_predict_from_modelfolder = "nnunetv2.inference.predict_from_raw_data:predict_entry_point_modelfolder"
 nnUNetv2_predict = "nnunetv2.inference.predict_from_raw_data:predict_entry_point"

@@ -4,28 +4,26 @@ import numpy as np
 import torch
 from torch import nn
 
-from nnunetv2.training.my_archs.unet_art_block import UNetARTBlock
 from nnunetv2.training.nnUNetTrainer.nnUNetTrainer import nnUNetTrainer
 from nnunetv2.utilities.ccc_metric import compute_ccc
 from nnunetv2.utilities.hd95_metric import compute_hd95
 
+# Attnetion0rLinearPlaceHolder教你插拔模块大概怎么写，看这里！！！
 
 class AttentionOrLinearPlaceHolder(nn.Module):
     """
-    这是一个“教学占位模块”，默认不会被接入当前训练图。
 
-    你以后如果想往网络里添加这些结构，就可以参考这个壳子自己实现：
+    ----------这个是你创新点的主要来源----------
+    我推荐你做的，什么维度进来，什么维度出来，这样子可插拔性极强。
+    -(B,C,H,W)进来，-(B,C,H,W)出来，直接卷积加注意力
+    -(B,N,C)进来，-(B,N,C)出来，直接线性层加注意力
+    -(B,C)进来，-(B,C)出来，直接线性层加注意力
+    ---------就相当于你在中间给维度变来变去-------
 
-    - `nn.Linear`
-    - `nn.MultiheadAttention`
-    - `MLP`
-    - `SE / CBAM / 自定义注意力`
-    - `特征融合分支`
-
-    重要：
     这个类的 `pass` 是故意保留的，因为它只是一个模板，不参与当前训练。
-    真正要把模块接进网络时，请去改 `nnunetv2/training/my_archs/unet_art_block.py`，
-    然后再在 `MyTrainer_Attention.build_network_architecture(...)` 里返回你的新网络。
+
+    这里作为一个“教学模块”，就是给你看看大概是怎么写的，我们底下有专门的模块
+    你在底下写就行，这里做一个实例。
     """
 
     def __init__(self, in_features: int, hidden_features: int, out_features: int):
@@ -52,8 +50,9 @@ class AttentionOrLinearPlaceHolder(nn.Module):
         # self.act = nn.GELU()
         # self.fc2 = nn.Linear(hidden_features, out_features)
         #
-        # 或者:
+        # 或者:你做一个注意力机制
         # self.attn = nn.MultiheadAttention(embed_dim=in_features, num_heads=8, batch_first=True)
+        # out,weight = attn(x,x,x)  # 这里的 x 就是输入特征，形状 (B,N,C)
         #
         pass
 
@@ -78,48 +77,28 @@ class AttentionOrLinearPlaceHolder(nn.Module):
         pass
 
 
+# MyTrainer_Attention 你可以改成你想要的名字，最后记得训练或者啥的时候，带上-tr XXXX（新名字）
+
 class MyTrainer_Attention(nnUNetTrainer):
-    """
-    这是一个给“模型层二次开发”准备的 trainer 模板。
 
-    你可以把它理解成 nnU-Net 和你自定义网络之间的胶水层，它主要负责四件事：
-
-    1. 接住 nnU-Net 传进来的 plans / dataset / fold / device 等上下文信息。
-    2. 告诉 nnU-Net 到底该实例化哪一个网络。
-    3. 告诉 nnU-Net 用什么 loss、deep supervision、optimizer。
-    4. 如果需要，追加你自己的验证指标和日志。
-
-    你当前这条开发路线非常推荐：
-
-    - 数据处理层不动
-    - dataloader 不动
-    - 训练框架主循环不动
-    - 只在 trainer 层和 network 层做模型改造
-
-    当你执行：
-
-    `nnUNetv2_train DATASET_ID 2d 0 -tr MyTrainer_Attention`
-
-    大致函数链是：
-
-    `run_training_entry()`
-    -> `run_training(...)`
-    -> `get_trainer_from_args(...)`
-    -> 查找到 `MyTrainer_Attention`
-    -> 实例化 trainer
-    -> `run_training()`
-    -> `initialize()`
-    -> `build_network_architecture(...)`
-    -> `_build_loss()`
-    -> `get_dataloaders()`
-    -> `train_step()` / `validation_step()`
-
-    真正模型被调用的位置不是 `build_network_architecture(...)`，
-    而是 `train_step()` / `validation_step()` 里面的：
-
-    `output = self.network(data)`
     """
 
+    这是一个给“模型层二次开发”准备的 trainer 模板。也是nnUNet这个网络默认的合法渠道。
+    nnUNet这个网络的模型可以用两种方法修改。
+    1- 直接改网络大概，因为它的网络来自于pip库，所以你不好修改是第一，作者一更新就完蛋（不推荐）
+    2- 在这个MyTrainer_Attention里面进行修改，这个我很推荐，简单易用，还不随版本更新更迭。
+
+    上面的AttentionOrLinearPlaceHolder是一个教学实例模块，MyTrainer_Attention是一个训练器
+
+    何谓训练器？也就是里面既有网络呀，也有你loss选什么，优化器optimizer选什么，
+    训练步骤train_step怎么写，验证步骤validation_step怎么写，指标怎么写等等等的一个集合体。
+    你可以在这个MyTrainer_Attention里面改网络，改loss，改优化器，改训练步骤，改验证步骤，改指标等等等。
+
+    具体改造的教程看每个def，我都给你写好了，怎么改。
+
+    """
+
+    # 最初的初始化magicmethod，这个你不用动的哦。
     def __init__(
         self,
         plans: dict,
@@ -132,7 +111,8 @@ class MyTrainer_Attention(nnUNetTrainer):
         参数说明
         ----------
         plans:
-            nnU-Net 规划器生成的总配置字典。
+            nnU-Net 规划器生成的总配置字典。（这个配置你别动）
+            一般对于我们脂肪分割的数据不变，plans每次大概率还是那个东西
             它来自 `nnUNet_preprocessed/<DatasetName>/<plans_identifier>.json`。
 
             这里面包含的不是“单纯网络参数”，而是整套实验规划信息，例如：
@@ -144,8 +124,8 @@ class MyTrainer_Attention(nnUNetTrainer):
             - spacing / resampling / cascade 相关信息
 
             父类会把它包装成 `PlansManager`，后续很多接口都从这里读配置。
-
-        configuration:
+        —---------
+        configuration:（一般为了良好的性能，我们选择 `3d_fullres` 这个配置，毕竟都比较了，肯定挑最好的）
             当前训练配置名，通常是：
             - `2d`
             - `3d_fullres`
@@ -153,8 +133,8 @@ class MyTrainer_Attention(nnUNetTrainer):
             - `3d_cascade_fullres`
 
             它会决定当前训练到底选用哪套 patch size、batch size、network kwargs。
-
-        fold:
+        -----------
+        fold:（也就是传说中的五折验证）
             当前交叉验证 fold。
             常见取值是 `0~4`，也可能是 `all`。
 
@@ -162,23 +142,21 @@ class MyTrainer_Attention(nnUNetTrainer):
             - 数据划分
             - 输出目录
             - checkpoint 位置
-
-        dataset_json:
+        -----------
+        dataset_json:（这个你会碰到的，自己写的，里面就告诉你了一些基本信息）
             预处理目录中的 `dataset.json` 内容。
             它会告诉 nnU-Net：
-            - label 定义
-            - file ending
-            - channel / modality 信息
-            - 是否有 ignore label
-
-            父类会基于它构造 `label_manager`。
-
-        device:
+            - 谁是背景？
+            - 是不是CT？还是磁共振？
+            - 有多少数据？
+            基本就这些信息
+        -----------
+        device:（这个暂时无视掉）
             当前训练设备。
             常见是：
-            - `torch.device("cuda")`
-            - `torch.device("cpu")`
-            - `torch.device("mps")`
+            - `torch.device("cuda")`——如果你有 NVIDIA GPU，通常就是这个了。
+            - `torch.device("cpu")`——如果你没有 GPU，或者想在 CPU 上测试代码。
+            - `torch.device("mps")`——如果你有 Apple M1/M2/M3/M4/M5芯片，可以使用这个。
 
             父类还会根据 DDP 情况重新修正实际使用的 device。
         """
@@ -186,26 +164,28 @@ class MyTrainer_Attention(nnUNetTrainer):
 
         # 如果你的网络不是“多尺度输出列表”，而是只输出一个 segmentation logits 张量，
         # 最稳妥的做法就是直接关闭 deep supervision。
+        # 这一点很重要，因为多尺度输出其实很麻烦！！！我推荐直接输出一个结果做预测就好了，毕竟你又不是非要和原版 nnU-Net 的架构完全一样。
         self.enable_deep_supervision = False
 
+    # 改优化器和学习率调度器
+    # 也就是这里也是一个重点
     def configure_optimizers(self):
         """
-        这个接口控制“优化器”和“学习率调度器”。
-
-        你以后如果想改这些内容，通常就在这里改：
-        - SGD -> Adam / AdamW
-        - PolyLR -> CosineAnnealing / Warmup / OneCycle
-        - 学习率、weight decay、momentum
-
-        当前先保持父类默认行为，避免影响现有训练流程。
-
-        返回
+        默认返回的是super（self，self）.configure_optimizers()，也就是父类 nnUNetTrainer 的优化器配置。
+        这里解释一下，super（self，self）其实就是MRO调用链
+        找nnUNetTrainer里面的configure_optimizers函数，直接拿来用就行了。
         ----------
-        Tuple[torch.optim.Optimizer, object]:
-            第一个返回值是 optimizer，第二个返回值是 lr scheduler。
+        
+        ----------
+        这里默认会返回一个元祖，（optimizer，scheduler），其中：
+        - optimizer 优化器，也就是你天天看到的什么Adam啊，SGD啊
+        - scheduler 是一个学习率调度器对象，比如PolyLR，就是随着epoch增加，学习率逐渐降低的意思。
         """
+
+        # 要改的话很简单，右键configure_optimizers，转到定义
         return super().configure_optimizers()
 
+    # 这东西别动，一般来说我们不需要动它
     def train_step(self, batch: dict) -> dict:
         """
         这是“一次训练迭代”的执行入口。
@@ -238,6 +218,7 @@ class MyTrainer_Attention(nnUNetTrainer):
         """
         return super().train_step(batch)
 
+    # 这玩意建议直接关掉
     def set_deep_supervision_enabled(self, enabled: bool):
         """
         这个接口控制“是否在网络内部启用 deep supervision”。
@@ -266,8 +247,12 @@ class MyTrainer_Attention(nnUNetTrainer):
         - loss 端误以为输出是 `List[Tensor]`
         - 训练和验证阶段的输出形状不一致
         """
+        # 这个就是关掉啦，有的函数不需要return，只需要单纯修改一下状态就可以了。
         self.enable_deep_supervision = False
 
+
+    # 修改loss在这里！！！你的损失函数，创新点，你除了模块，损失函数也是一个很有意思的东西
+    # 也就是说，_build_loss是决定用什么损失函数的地方。
     def _build_loss(self):
         """
         这个接口负责构造训练使用的 loss。
@@ -279,28 +264,13 @@ class MyTrainer_Attention(nnUNetTrainer):
         - `self.is_ddp`
         - `self.enable_deep_supervision`
 
-        当前策略
-        ----------
-        因为我们已经关闭了 deep supervision，所以这里返回的是“普通 loss”，
-        而不是父类那种再额外套一层 `DeepSupervisionWrapper` 的版本。
-
-        返回
-        ----------
-        nn.Module:
-            一个可调用的 loss 对象。
-            训练时会被这样使用：
-
-            `loss = self.loss(output, target)`
-
-        你以后最常改的地方
-        ----------
-        - Dice + CE 的权重
-        - 是否改成 BCE
-        - 是否加 focal / boundary / topology loss
-        - 是否改 region-based training 的分支逻辑
+        
         """
         from nnunetv2.training.loss.dice import MemoryEfficientSoftDiceLoss
 
+        # region-based segmentation任务是指，有的奇葩分类任务，可能一个像素点可能同时属于多个类别
+        # （比如脂肪分割里，可能既有“内脏脂肪”又有“皮下脂肪”），但是我们这个就是简单的二分类，不用担心
+        # 我为了保持原来的代码结构，还留了这个判断哈
         if self.label_manager.has_regions:
             from nnunetv2.training.loss.compound_losses import DC_and_BCE_loss
 
@@ -315,9 +285,16 @@ class MyTrainer_Attention(nnUNetTrainer):
                 use_ignore_label=self.label_manager.ignore_label is not None,
                 dice_class=MemoryEfficientSoftDiceLoss,
             )
+
+        # 看这里！！！！这才是我们用的
+        # 如果你要用什么很牛逼的损失函数，可以跳转到compound_losses定义，然后在这里加一个你想要的loss
+        # 推荐损失函数用AI写，AI写这个写得很准很准！你把你想要的东西，跟AI介绍详细，就行了，然后import过来
         else:
             from nnunetv2.training.loss.compound_losses import DC_and_CE_loss
 
+            # 这个是Dice + 交叉熵混合的loss，很常用的
+            # 怎么改呢？做法很简单，右键compound_losses转到定义，然后进行这个文件，新建一个loss类（让AI写，描述好你的想法）
+            # 之后在这里把DC_and_CE_loss改成你新建的那个类就行了，记得传入正确的参数哦。
             loss = DC_and_CE_loss(
                 {
                     "batch_dice": self.configuration_manager.batch_dice,
@@ -334,6 +311,8 @@ class MyTrainer_Attention(nnUNetTrainer):
 
         return loss
 
+    # staticmethod装饰器可以让你直接用MyTrainer_Attention.build_network_architecture(...)来调用这个函数，而不需要先实例化一个对象。 
+    # 这里参数比较多，我们慢慢看，这里就是你“搭建”网络骨架的地方，很重要哦！！！
     @staticmethod
     def build_network_architecture(
         architecture_class_name: str,
@@ -347,7 +326,7 @@ class MyTrainer_Attention(nnUNetTrainer):
         这是“模型结构接入 nnU-Net”的核心接口。
 
         参数说明
-        ----------
+        ----------不重要
         architecture_class_name:
             plans 里记录的原始网络类名。
             在原版 nnU-Net 里，这个参数会决定默认架构如何被构建。
@@ -357,6 +336,7 @@ class MyTrainer_Attention(nnUNetTrainer):
 
             它保留在函数签名里，主要是为了兼容 nnU-Net 的统一调用方式。
 
+        -----------重要！！
         arch_init_kwargs:
             plans 中为网络准备的初始化参数字典。
             常见内容包括：
@@ -371,12 +351,14 @@ class MyTrainer_Attention(nnUNetTrainer):
             这些参数非常有价值，因为它们已经根据 nnU-Net 的实验规划自动适配过。
             如果你的自定义网络仍然是 U-Net 风格，多数情况下建议继续利用这些参数。
 
+        -----------不重要
         arch_init_kwargs_req_import:
             某些 kwargs 对应的类或函数需要动态导入时，nnU-Net 会用到这个字段。
 
             对你当前这个手写网络来说，它通常不是最核心的参数，
             但函数签名必须保留，才能和父类的调用规范对齐。
 
+        ------------你觉得这个重要不重要？
         num_input_channels:
             网络输入通道数。
             它不是你手工写死的，而是 nnU-Net 根据数据集自动推出来的。
@@ -387,6 +369,7 @@ class MyTrainer_Attention(nnUNetTrainer):
 
             你自定义网络第一层一定要和它对齐。
 
+        ------------我猜很重要
         num_output_channels:
             网络输出通道数，也就是 segmentation heads 数量。
             这个值由 `label_manager` 决定，不一定等于“类别总数”本身。
@@ -394,10 +377,11 @@ class MyTrainer_Attention(nnUNetTrainer):
             原因是 nnU-Net 支持：
             - 普通 class-based segmentation
             - region-based segmentation
-            - ignore label
+            - ignore label 这个意思就是不参加训练的标签
 
             所以最稳的做法就是永远直接使用这个参数，不要自己手写类别数。
 
+        -------------我已经帮你关了
         enable_deep_supervision:
             父类传进来的 deep supervision 开关。
             注意它只是“父类当前的配置意图”，不代表你一定要照做。
@@ -425,29 +409,34 @@ class MyTrainer_Attention(nnUNetTrainer):
         真正 forward 的调用发生在：
         `train_step()` / `validation_step()` 里的 `self.network(data)`。
         """
+
+
+        # 这个print很重要，比如你输入指令-tr MyTrainer_Attention，
+    
+        # 但是怎么知道是不是真调用了呢？就看这个print，如果有，说明数据走到这里了！
         print("MyTrainer_Attention build_network_architecture called")
         print("\nnum_input_channels:", num_input_channels)
         print("\nnum_output_channels:", num_output_channels)
-        print("\nenable_deep_supervision from parent:", enable_deep_supervision)
+        print("\nenable_deep_supervision from parent:", enable_deep_supervision) # 这个设置成False，最好别用深层次监督，不然不是很好写loss
         print("\nignored architecture_class_name:", architecture_class_name)
-        print("\narch_init_kwargs keys:", list(arch_init_kwargs.keys()))
+        print("\narch_init_kwargs keys:", list(arch_init_kwargs.keys())) # 拿值
         print("\narch_init_kwargs_req_import:", arch_init_kwargs_req_import)
 
-        # 这里是当前工程真正接入网络的位置。
-        # 如果你未来写了自己的网络，比如在 `unet_art_block.py` 里加入了：
-        # - nn.Linear
-        # - 自注意力
-        # - MLP
-        # - 跨尺度融合
-        # 那么最终通常就是在这里把返回对象替换掉。
-        network = UNetARTBlock(
+        #———————————————————————————————看这里！！！！————————————————————————————————#
+        # 注意到我这里的UNetARTBlock签名没有进来的多，因为我觉得就这些就够用了。
+
+        from nnunetv2.training.my_archs.Net import YourNet
+
+        # 你的网络，这里就是你做自己的网络的地方啦。右键跳转过去，我们来看看网络怎么做
+        network = YourNet(
             input_channels=num_input_channels,
             num_class=num_output_channels,
             deep_supervision=False,
-            **arch_init_kwargs,
+            **arch_init_kwargs, 
         )
         return network
 
+    # ————————————————————————————底下别动了，指标我都基本帮你写好了————————————————————————————————#
     def validation_step(self, batch: dict) -> dict:
         """
         这是“一次验证迭代”的执行入口。

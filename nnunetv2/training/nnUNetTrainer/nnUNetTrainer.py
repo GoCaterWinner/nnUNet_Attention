@@ -504,6 +504,8 @@ class nnUNetTrainer(object):
                                    self.configuration_manager, '\n', add_timestamp=False)
             self.print_to_log_file('These are the global plan.json settings:\n', dct, '\n', add_timestamp=False)
 
+    # 就这里，你要改造优化器或者学习率调度器，我推荐的话，一般SGD + PolyLR就很屌了。（也就是最好别动这个）
+    # 真要想改的话，优化器设置成Adam也可以，那玩意泛用性很强的。
     def configure_optimizers(self):
         optimizer = torch.optim.SGD(self.network.parameters(), self.initial_lr, weight_decay=self.weight_decay,
                                     momentum=0.99, nesterov=True)
