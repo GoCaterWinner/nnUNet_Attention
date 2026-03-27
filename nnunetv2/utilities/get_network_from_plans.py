@@ -5,7 +5,7 @@ from typing import Union
 from nnunetv2.utilities.find_class_by_name import recursive_find_python_class
 from batchgenerators.utilities.file_and_folder_operations import join
 
-
+# 这里也是你只改造某一层的关键。
 def get_network_from_plans(arch_class_name, arch_kwargs, arch_kwargs_req_import, input_channels, output_channels,
                            allow_init=True, deep_supervision: Union[bool, None] = None):
     network_class = arch_class_name

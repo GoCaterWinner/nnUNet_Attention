@@ -300,6 +300,7 @@ class nnUNetTrainer(object):
             dct['cudnn_version'] = cudnn_version
             save_json(dct, join(self.output_folder, "debug.json"))
 
+    # 默认建立网络的格式，如果你想用nnUNet的骨架，但是某一层，你换成你自己做的东西，就需要它了。
     @staticmethod  # 静态装饰器，底下不需要加self
     def build_network_architecture(architecture_class_name: str,
                                    arch_init_kwargs: dict,

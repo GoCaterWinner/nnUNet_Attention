@@ -1,13 +1,14 @@
 import argparse
 from pathlib import Path
 from pprint import pformat
-from typing import Optional, Sequence
+from typing import List, Optional, Sequence
 
 import torch
 
 import nnunetv2
 from batchgenerators.utilities.file_and_folder_operations import join, load_json, maybe_mkdir_p
 from nnunetv2.utilities.find_class_by_name import recursive_find_python_class
+from nnunetv2.training.nnUNetTrainer.nnUNetTrainer import nnUNetTrainer
 from nnunetv2.utilities.label_handling.label_handling import determine_num_input_channels
 from nnunetv2.utilities.plans_handling.plans_handler import PlansManager
 
@@ -45,6 +46,12 @@ def parse_args():
         type=str,
         default="MyTrainer_Attention",
         help="用来构建网络的 trainer 类名。默认：MyTrainer_Attention",
+    )
+    parser.add_argument(
+        "--mode",
+        choices=("trainer", "default", "both"),
+        default="both",
+        help="查看哪种模型视角：trainer=你的自定义 trainer，default=nnUNet 默认按 plans 搭建，both=两者都看。",
     )
     parser.add_argument(
         "--num-input-channels",
@@ -154,6 +161,98 @@ def export_fx_graph(network: torch.nn.Module, output_file: Path):
     output_file.write_text(str(traced.graph), encoding="utf-8")
 
 
+def describe_module(module: torch.nn.Module) -> str:
+    if isinstance(module, (torch.nn.Conv1d, torch.nn.Conv2d, torch.nn.Conv3d)):
+        return (
+            f"{module.__class__.__name__}"
+            f"({module.in_channels}->{module.out_channels}, "
+            f"k={tuple(module.kernel_size)}, s={tuple(module.stride)})"
+        )
+    if isinstance(module, torch.nn.Linear):
+        return f"Linear({module.in_features}->{module.out_features})"
+    if isinstance(module, (torch.nn.BatchNorm1d, torch.nn.BatchNorm2d, torch.nn.BatchNorm3d,
+                           torch.nn.InstanceNorm1d, torch.nn.InstanceNorm2d, torch.nn.InstanceNorm3d)):
+        return f"{module.__class__.__name__}(num_features={module.num_features})"
+    if isinstance(module, torch.nn.Sequential):
+        return f"Sequential(len={len(module)})"
+    return module.__class__.__name__
+
+
+def build_module_tree_lines(module: torch.nn.Module, prefix: str = "", depth: int = 0, max_depth: int = 3) -> List[str]:
+    if depth == 0:
+        lines = [describe_module(module)]
+    else:
+        lines = []
+
+    if depth >= max_depth:
+        return lines
+
+    children = list(module.named_children())
+    for name, child in children:
+        lines.append(f"{prefix}-> {name}: {describe_module(child)}")
+        lines.extend(build_module_tree_lines(child, prefix + "   ", depth + 1, max_depth))
+    return lines
+
+
+def build_plans_ascii_diagram(configuration_manager, num_input_channels: int, num_output_channels: int,
+                              enable_deep_supervision: bool) -> str:
+    arch_kwargs = configuration_manager.network_arch_init_kwargs
+    features = arch_kwargs.get("features_per_stage", [])
+    kernels = arch_kwargs.get("kernel_sizes", [])
+    strides = arch_kwargs.get("strides", [])
+    enc_depth = arch_kwargs.get("n_conv_per_stage", arch_kwargs.get("n_blocks_per_stage", []))
+    dec_depth = arch_kwargs.get("n_conv_per_stage_decoder", [])
+    patch_size = configuration_manager.patch_size
+
+    lines = [
+        f"输入(B, {num_input_channels}, {', '.join(str(i) for i in patch_size)})",
+    ]
+
+    for idx, feat in enumerate(features):
+        stage_tag = "Bottleneck" if idx == len(features) - 1 else f"Encoder Stage {idx}"
+        kernel = kernels[idx] if idx < len(kernels) else "?"
+        stride = strides[idx] if idx < len(strides) else "?"
+        depth_here = enc_depth[idx] if idx < len(enc_depth) else "?"
+        lines.append(
+            f"  -> {stage_tag} [通道={feat}, kernel={kernel}, stride={stride}, blocks/convs={depth_here}]"
+        )
+
+    decoder_features = list(reversed(features[:-1]))
+    for idx, feat in enumerate(decoder_features):
+        src_stage = len(decoder_features) - 1 - idx
+        depth_here = dec_depth[idx] if idx < len(dec_depth) else "?"
+        lines.append(
+            f"  -> Decoder Stage {src_stage} [通道={feat}, convs={depth_here}]"
+        )
+
+    lines.append(f"  -> Seg Head [输出通道={num_output_channels}]")
+    if enable_deep_supervision:
+        lines.append("  -> Deep Supervision Heads [开启]")
+    else:
+        lines.append("  -> Deep Supervision Heads [关闭]")
+    return "\n".join(lines)
+
+
+def build_network_section_markdown(title: str, label: str, network: torch.nn.Module) -> str:
+    tree_text = "\n".join(build_module_tree_lines(network))
+    return "\n".join([
+        f"## {title}",
+        "",
+        f"- 视角说明: `{label}`",
+        "",
+        "### 模块树",
+        "```text",
+        tree_text,
+        "```",
+        "",
+        "### 完整模型打印",
+        "```python",
+        str(network),
+        "```",
+        "",
+    ])
+
+
 def make_plain_summary(
     plans_path: Path,
     dataset_json_path: Optional[Path],
@@ -163,7 +262,7 @@ def make_plain_summary(
     num_input_channels: int,
     num_output_channels: int,
     enable_deep_supervision: bool,
-    network: torch.nn.Module,
+    network_views: List[dict],
 ) -> str:
     arch_kwargs_text = pformat(
         configuration_manager.network_arch_init_kwargs,
@@ -193,16 +292,34 @@ def make_plain_summary(
         f"- num_output_channels: {num_output_channels}",
         f"- enable_deep_supervision: {enable_deep_supervision}",
         "",
+        "[plans 级骨架示意]",
+        build_plans_ascii_diagram(
+            configuration_manager,
+            num_input_channels,
+            num_output_channels,
+            enable_deep_supervision,
+        ),
+        "",
         "[network_arch_init_kwargs]",
         arch_kwargs_text,
         "",
         "[network_arch_init_kwargs_req_import]",
         req_import_text,
         "",
-        "[模型结构]",
-        str(network),
-        "",
     ]
+
+    for view in network_views:
+        lines.extend([
+            f"[{view['title']}]",
+            f"- 视角说明: {view['label']}",
+            "",
+            "[模块树]",
+            "\n".join(build_module_tree_lines(view["network"])),
+            "",
+            "[完整模型结构]",
+            str(view["network"]),
+            "",
+        ])
     return "\n".join(lines)
 
 
@@ -215,7 +332,7 @@ def make_markdown_summary(
     num_input_channels: int,
     num_output_channels: int,
     enable_deep_supervision: bool,
-    network: torch.nn.Module,
+    network_views: List[dict],
 ) -> str:
     arch_kwargs_text = pformat(
         configuration_manager.network_arch_init_kwargs,
@@ -243,6 +360,16 @@ def make_markdown_summary(
         f"- num_output_channels: `{num_output_channels}`",
         f"- enable_deep_supervision: `{enable_deep_supervision}`",
         "",
+        "## plans 级骨架示意",
+        "```text",
+        build_plans_ascii_diagram(
+            configuration_manager,
+            num_input_channels,
+            num_output_channels,
+            enable_deep_supervision,
+        ),
+        "```",
+        "",
         "## network_arch_init_kwargs",
         "```python",
         arch_kwargs_text,
@@ -253,13 +380,37 @@ def make_markdown_summary(
         req_import_text,
         "```",
         "",
-        "## 模型结构",
-        "```python",
-        str(network),
-        "```",
-        "",
     ]
+    for view in network_views:
+        lines.append(build_network_section_markdown(view["title"], view["label"], view["network"]))
     return "\n".join(lines)
+
+
+def build_network_with_trainer(trainer_name: str, configuration_manager, num_input_channels: int,
+                               num_output_channels: int, enable_deep_supervision: bool) -> torch.nn.Module:
+    trainer_class = resolve_trainer_class(trainer_name)
+    network = trainer_class.build_network_architecture(
+        configuration_manager.network_arch_class_name,
+        configuration_manager.network_arch_init_kwargs,
+        configuration_manager.network_arch_init_kwargs_req_import,
+        num_input_channels,
+        num_output_channels,
+        enable_deep_supervision,
+    )
+    return network.cpu().eval()
+
+
+def build_default_network(configuration_manager, num_input_channels: int, num_output_channels: int,
+                          enable_deep_supervision: bool) -> torch.nn.Module:
+    network = nnUNetTrainer.build_network_architecture(
+        configuration_manager.network_arch_class_name,
+        configuration_manager.network_arch_init_kwargs,
+        configuration_manager.network_arch_init_kwargs_req_import,
+        num_input_channels,
+        num_output_channels,
+        enable_deep_supervision,
+    )
+    return network.cpu().eval()
 
 
 def main():
@@ -275,7 +426,6 @@ def main():
     plans_manager = PlansManager(plans)
     configuration_name = choose_configuration(plans_manager, args.configuration)
     configuration_manager = plans_manager.get_configuration(configuration_name)
-    trainer_class = resolve_trainer_class(args.trainer)
 
     dataset_json = load_json(str(dataset_json_path)) if dataset_json_path is not None else None
 
@@ -300,15 +450,32 @@ def main():
         configuration_manager.network_arch_init_kwargs,
     )
 
-    network = trainer_class.build_network_architecture(
-        configuration_manager.network_arch_class_name,
-        configuration_manager.network_arch_init_kwargs,
-        configuration_manager.network_arch_init_kwargs_req_import,
-        num_input_channels,
-        num_output_channels,
-        enable_deep_supervision,
-    )
-    network = network.cpu().eval()
+    network_views: List[dict] = []
+    if args.mode in ("trainer", "both"):
+        network_views.append({
+            "title": "自定义 Trainer 视角",
+            "label": f"{args.trainer} 实际返回的模型",
+            "name": "trainer",
+            "network": build_network_with_trainer(
+                args.trainer,
+                configuration_manager,
+                num_input_channels,
+                num_output_channels,
+                enable_deep_supervision,
+            ),
+        })
+    if args.mode in ("default", "both"):
+        network_views.append({
+            "title": "nnUNet 默认视角",
+            "label": "严格按照 plans.json + dataset.json 构建的默认网络",
+            "name": "default",
+            "network": build_default_network(
+                configuration_manager,
+                num_input_channels,
+                num_output_channels,
+                enable_deep_supervision,
+            ),
+        })
 
     output_dir = Path(args.output_dir).expanduser().resolve() if args.output_dir is not None else (
         Path.cwd() / f"model_inspect_{configuration_name}"
@@ -324,7 +491,7 @@ def main():
         num_input_channels,
         num_output_channels,
         enable_deep_supervision,
-        network,
+        network_views,
     )
     summary_md = make_markdown_summary(
         plans_path,
@@ -335,7 +502,7 @@ def main():
         num_input_channels,
         num_output_channels,
         enable_deep_supervision,
-        network,
+        network_views,
     )
     summary_file = output_dir / "model_summary.txt"
     summary_md_file = output_dir / "model_summary.md"
@@ -353,23 +520,24 @@ def main():
             configuration_manager.patch_size,
         )
         dummy_input = torch.randn(dummy_input_shape, dtype=torch.float32)
+        for view in network_views:
+            fx_graph_file = output_dir / f"{view['name']}_fx_graph.txt"
+            try:
+                export_fx_graph(view["network"], fx_graph_file)
+                print(f"Saved torch.fx graph to: {fx_graph_file}")
+            except Exception as e:
+                print(f"{view['name']} 的 torch.fx 图导出跳过: {e}")
 
-        fx_graph_file = output_dir / "fx_graph.txt"
-        try:
-            export_fx_graph(network, fx_graph_file)
-            print(f"Saved torch.fx graph to: {fx_graph_file}")
-        except Exception as e:
-            print(f"torch.fx graph export skipped: {e}")
-
-        pdf_graph_file = output_dir / "network_architecture.pdf"
-        try:
-            with torch.no_grad():
-                export_hiddenlayer_graph(network, dummy_input, pdf_graph_file)
-            print(f"Saved hiddenlayer PDF graph to: {pdf_graph_file}")
-        except ModuleNotFoundError:
-            print("hiddenlayer is not installed, so PDF graph export was skipped.")
-        except Exception as e:
-            print(f"hiddenlayer graph export skipped: {e}")
+            pdf_graph_file = output_dir / f"{view['name']}_network_architecture.pdf"
+            try:
+                with torch.no_grad():
+                    export_hiddenlayer_graph(view["network"], dummy_input, pdf_graph_file)
+                print(f"Saved hiddenlayer PDF graph to: {pdf_graph_file}")
+            except ModuleNotFoundError:
+                print("hiddenlayer 未安装，因此 PDF 结构图导出被跳过。")
+                break
+            except Exception as e:
+                print(f"{view['name']} 的 hiddenlayer 结构图导出跳过: {e}")
 
 
 if __name__ == "__main__":

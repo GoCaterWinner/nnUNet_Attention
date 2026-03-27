@@ -1,17 +1,16 @@
 # 如何修改nnU-Netv2的模型架构呢？
 
-这份教程专门面向你现在这条路子：
+我们要做创新，最好做两件事情：
 
-- 数据处理层沿用 nnU-Net 原版，不动。并且也不推荐改。
-- 模型层我们通过MyTrainer_Attention强制用我们的网络。
-- 训练命令固定使用 `-tr MyTrainer_Attention`。
+- 对模型某个模块进行创新，不是让你加入ViT，或者加入Mamba就是创新。
+- loss函数很适合作为创新，比如它用来限制什么，但是这个是可选项。
 
 也就是说，你真正要改的重点不是 dataloader、preprocess，而是：
 
 - `nnunetv2/training/nnUNetTrainer/trainer_attention.py` ——> 修改训练器
 - `nnunetv2/training/my_archs/Net.py` ——> 修改真正的模型，我给了一个很小很小的模型，你在上面改就行了。
 
----
+
 
 ## 1. 当你执行 `nnUNetv2_train ... -tr MyTrainer_Attention` 时，函数链到底怎么走？
 

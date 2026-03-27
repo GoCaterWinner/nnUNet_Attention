@@ -3,6 +3,7 @@ from nnunetv2.utilities.plans_handling.plans_handler import PlansManager
 import json
 import os
 
+# 这个是用来帮你测试你的 MyTrainer_Attention 的 build_network_architecture 里到底有没有问题的，就是能不能走通到那里。
 def main():
     # 1) 找到你训练时用的 plans 和 dataset.json
     # 这些通常在 nnUNet_results 里的某个实验文件夹下
