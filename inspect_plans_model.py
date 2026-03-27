@@ -13,6 +13,16 @@ from nnunetv2.utilities.label_handling.label_handling import determine_num_input
 from nnunetv2.utilities.plans_handling.plans_handler import PlansManager
 
 
+"""
+    我准备好的，可视化界面，nnUNet这个奇葩网络，很复杂很复杂很复杂。
+    它有一个特点，不像我们以前看的那种简单模型，那种简单的模型，一般有一个model.py,里面写好了个各种代码啊，啥的，你在里面直接把人家的删除，再改成你的，就ok了。
+    但是这个不一样，nnUNet的模型是怎么来的？我来简单梳理一下哈：
+    nnUNet有一个很厉害很厉害的数据预处理部分，它会分析你的数据特点，比如脂肪数据，然后生成一个plans.json和dataset.json，根据这俩，做出一个它认为很好的网络架构。
+    但是这有个问题，nnUNet想给你做的模型，你看不到，就很迷，所以我做了一个“可视化”模块，
+    powershell输入python inspect_plans_model.py XXX XXX 啥的，就可以看到nnUNet想给你的数据集做的模型到底长啥样，这很方便，
+    因为你不一定是每一次都需要自己做整个网络，那不现实，也很耗精力，我们每次只改动其中一个模块，我觉得再合适不过啦。
+"""
+
 def parse_args():
     parser = argparse.ArgumentParser(
         description="读取 nnU-Net 的 plans.json，并构建对应模型用于查看结构。"
@@ -161,6 +171,224 @@ def export_fx_graph(network: torch.nn.Module, output_file: Path):
     output_file.write_text(str(traced.graph), encoding="utf-8")
 
 
+def ceil_div_tuple(values: Sequence[int], divisors: Sequence[int]) -> List[int]:
+    return [int((v + d - 1) // d) for v, d in zip(values, divisors)]
+
+
+def mul_tuple(values: Sequence[int], factors: Sequence[int]) -> List[int]:
+    return [int(v * f) for v, f in zip(values, factors)]
+
+
+def format_tensor_shape(channels: int, spatial: Sequence[int]) -> str:
+    spatial_str = ", ".join(str(i) for i in spatial)
+    return f"(B, {channels}, {spatial_str})"
+
+
+def get_stage_role(module_name: str) -> str:
+    if module_name == "Input":
+        return "原始输入 patch"
+    if "Encoder Stage 0" in module_name:
+        return "浅层纹理特征"
+    if "Encoder Stage 1" in module_name or "Encoder Stage 2" in module_name:
+        return "逐步下采样，提取中层特征"
+    if "Encoder Stage" in module_name:
+        return "高语义特征，分辨率继续降低"
+    if "Bottleneck" in module_name:
+        return "语义最强的位置，最适合插 Attention/Transformer"
+    if "Decoder Stage" in module_name:
+        return "逐步上采样并融合 skip 特征"
+    if "Seg Head" in module_name:
+        return "输出最终分割 logits"
+    if "Deep Supervision" in module_name:
+        return "辅助监督分支"
+    return ""
+
+
+def build_plans_flow_entries(configuration_manager, num_input_channels: int, num_output_channels: int,
+                             enable_deep_supervision: bool) -> List[dict]:
+    arch_kwargs = configuration_manager.network_arch_init_kwargs
+    features = arch_kwargs.get("features_per_stage", [])
+    kernels = arch_kwargs.get("kernel_sizes", [])
+    strides = arch_kwargs.get("strides", [])
+    enc_depth = arch_kwargs.get("n_conv_per_stage", arch_kwargs.get("n_blocks_per_stage", []))
+    dec_depth = arch_kwargs.get("n_conv_per_stage_decoder", [])
+    patch_size = [int(i) for i in configuration_manager.patch_size]
+
+    entries = []
+    current_spatial = patch_size
+    current_channels = num_input_channels
+
+    entries.append({
+        "module": "Input",
+        "flow": format_tensor_shape(current_channels, current_spatial),
+        "details": "输入 patch",
+        "role": get_stage_role("Input"),
+    })
+
+    for idx, feat in enumerate(features):
+        stride = strides[idx] if idx < len(strides) else [1] * len(current_spatial)
+        kernel = kernels[idx] if idx < len(kernels) else "?"
+        depth_here = enc_depth[idx] if idx < len(enc_depth) else "?"
+        out_spatial = ceil_div_tuple(current_spatial, stride)
+        stage_tag = "Bottleneck" if idx == len(features) - 1 else f"Encoder Stage {idx}"
+        entries.append({
+            "module": stage_tag,
+            "flow": f"{format_tensor_shape(current_channels, current_spatial)} --> {format_tensor_shape(feat, out_spatial)}",
+            "details": f"kernel={kernel}, stride={stride}, blocks/convs={depth_here}",
+            "role": get_stage_role(stage_tag),
+        })
+        current_spatial = out_spatial
+        current_channels = feat
+
+    decoder_features = list(reversed(features[:-1]))
+    decoder_strides = list(reversed(strides[1:])) if len(strides) > 1 else []
+    for idx, feat in enumerate(decoder_features):
+        stride = decoder_strides[idx] if idx < len(decoder_strides) else [1] * len(current_spatial)
+        depth_here = dec_depth[idx] if idx < len(dec_depth) else "?"
+        out_spatial = mul_tuple(current_spatial, stride)
+        src_stage = len(decoder_features) - 1 - idx
+        entries.append({
+            "module": f"Decoder Stage {src_stage}",
+            "flow": f"spatial {current_spatial} --> {out_spatial}",
+            "details": f"输出通道={feat}, upsample={stride}, convs={depth_here}",
+            "role": get_stage_role(f"Decoder Stage {src_stage}"),
+        })
+        current_spatial = out_spatial
+        current_channels = feat
+
+    entries.append({
+        "module": "Seg Head",
+        "flow": f"{format_tensor_shape(current_channels, current_spatial)} --> {format_tensor_shape(num_output_channels, current_spatial)}",
+        "details": "分割输出头",
+        "role": get_stage_role("Seg Head"),
+    })
+    entries.append({
+        "module": "Deep Supervision",
+        "flow": "enabled" if enable_deep_supervision else "disabled",
+        "details": "多尺度监督开关",
+        "role": get_stage_role("Deep Supervision"),
+    })
+
+    return entries
+
+
+def build_plans_ascii_diagram(configuration_manager, num_input_channels: int, num_output_channels: int,
+                              enable_deep_supervision: bool) -> str:
+    entries = build_plans_flow_entries(
+        configuration_manager,
+        num_input_channels,
+        num_output_channels,
+        enable_deep_supervision,
+    )
+    lines = ["模块流向图", "-" * 88]
+    for entry in entries:
+        lines.append(f"{entry['module']:<18} | {entry['flow']}")
+        lines.append(f"{'':<18} | {entry['details']}")
+    return "\n".join(lines)
+
+
+def build_plans_markdown_table(configuration_manager, num_input_channels: int, num_output_channels: int,
+                               enable_deep_supervision: bool) -> str:
+    entries = build_plans_flow_entries(
+        configuration_manager,
+        num_input_channels,
+        num_output_channels,
+        enable_deep_supervision,
+    )
+    lines = [
+        "| 模块 | 维度变化 | 参数说明 | 教学备注 |",
+        "| --- | --- | --- | --- |",
+    ]
+    for entry in entries:
+        lines.append(
+            f"| `{entry['module']}` | `{entry['flow']}` | {entry['details']} | {entry['role']} |"
+        )
+    return "\n".join(lines)
+
+
+def build_basic_info_markdown_table(plans_path: Path, dataset_json_path: Optional[Path], trainer_name: str,
+                                    configuration_name: str, configuration_manager, num_input_channels: int,
+                                    num_output_channels: int, enable_deep_supervision: bool) -> str:
+    lines = [
+        "| 字段 | 值 |",
+        "| --- | --- |",
+        f"| plans 路径 | `{plans_path}` |",
+        f"| dataset.json 路径 | `{dataset_json_path}` |" if dataset_json_path is not None else "| dataset.json 路径 | `未提供` |",
+        f"| trainer | `{trainer_name}` |",
+        f"| configuration | `{configuration_name}` |",
+        f"| patch_size | `{configuration_manager.patch_size}` |",
+        f"| spacing | `{configuration_manager.spacing}` |",
+        f"| network_arch_class_name | `{configuration_manager.network_arch_class_name}` |",
+        f"| num_input_channels | `{num_input_channels}` |",
+        f"| num_output_channels | `{num_output_channels}` |",
+        f"| enable_deep_supervision | `{enable_deep_supervision}` |",
+    ]
+    return "\n".join(lines)
+
+
+def build_teaching_flow_text(configuration_manager, num_input_channels: int, num_output_channels: int,
+                             enable_deep_supervision: bool) -> str:
+    entries = build_plans_flow_entries(
+        configuration_manager,
+        num_input_channels,
+        num_output_channels,
+        enable_deep_supervision,
+    )
+    lines = [
+        "一眼看懂版",
+        "=" * 88,
+    ]
+    for idx, entry in enumerate(entries):
+        if idx == 0:
+            lines.append(f"[{entry['module']}] {entry['flow']}")
+        else:
+            lines.append(f"   --> [{entry['module']}] {entry['flow']}")
+        if entry["role"]:
+            lines.append(f"       作用: {entry['role']}")
+    return "\n".join(lines)
+
+
+def build_teaching_flow_markdown(configuration_manager, num_input_channels: int, num_output_channels: int,
+                                 enable_deep_supervision: bool) -> str:
+    entries = build_plans_flow_entries(
+        configuration_manager,
+        num_input_channels,
+        num_output_channels,
+        enable_deep_supervision,
+    )
+    lines = []
+    for idx, entry in enumerate(entries):
+        prefix = "" if idx == 0 else "&nbsp;&nbsp;&nbsp;--> "
+        line = f"{prefix}**{entry['module']}**: `{entry['flow']}`"
+        if entry["role"]:
+            line += f"  \n{prefix}说明: {entry['role']}"
+        lines.append(line)
+    return "\n\n".join(lines)
+
+
+def sanitize_mermaid_label(text: str) -> str:
+    return text.replace('"', "'")
+
+
+def build_mermaid_diagram(configuration_manager, num_input_channels: int, num_output_channels: int,
+                          enable_deep_supervision: bool) -> str:
+    entries = build_plans_flow_entries(
+        configuration_manager,
+        num_input_channels,
+        num_output_channels,
+        enable_deep_supervision,
+    )
+    lines = ["flowchart TD"]
+    for idx, entry in enumerate(entries):
+        node_id = f"N{idx}"
+        role = f"<br/>{entry['role']}" if entry["role"] else ""
+        label = sanitize_mermaid_label(f"{entry['module']}<br/>{entry['flow']}{role}")
+        lines.append(f'    {node_id}["{label}"]')
+        if idx > 0:
+            lines.append(f"    N{idx - 1} --> {node_id}")
+    return "\n".join(lines)
+
+
 def describe_module(module: torch.nn.Module) -> str:
     if isinstance(module, (torch.nn.Conv1d, torch.nn.Conv2d, torch.nn.Conv3d)):
         return (
@@ -192,45 +420,6 @@ def build_module_tree_lines(module: torch.nn.Module, prefix: str = "", depth: in
         lines.append(f"{prefix}-> {name}: {describe_module(child)}")
         lines.extend(build_module_tree_lines(child, prefix + "   ", depth + 1, max_depth))
     return lines
-
-
-def build_plans_ascii_diagram(configuration_manager, num_input_channels: int, num_output_channels: int,
-                              enable_deep_supervision: bool) -> str:
-    arch_kwargs = configuration_manager.network_arch_init_kwargs
-    features = arch_kwargs.get("features_per_stage", [])
-    kernels = arch_kwargs.get("kernel_sizes", [])
-    strides = arch_kwargs.get("strides", [])
-    enc_depth = arch_kwargs.get("n_conv_per_stage", arch_kwargs.get("n_blocks_per_stage", []))
-    dec_depth = arch_kwargs.get("n_conv_per_stage_decoder", [])
-    patch_size = configuration_manager.patch_size
-
-    lines = [
-        f"输入(B, {num_input_channels}, {', '.join(str(i) for i in patch_size)})",
-    ]
-
-    for idx, feat in enumerate(features):
-        stage_tag = "Bottleneck" if idx == len(features) - 1 else f"Encoder Stage {idx}"
-        kernel = kernels[idx] if idx < len(kernels) else "?"
-        stride = strides[idx] if idx < len(strides) else "?"
-        depth_here = enc_depth[idx] if idx < len(enc_depth) else "?"
-        lines.append(
-            f"  -> {stage_tag} [通道={feat}, kernel={kernel}, stride={stride}, blocks/convs={depth_here}]"
-        )
-
-    decoder_features = list(reversed(features[:-1]))
-    for idx, feat in enumerate(decoder_features):
-        src_stage = len(decoder_features) - 1 - idx
-        depth_here = dec_depth[idx] if idx < len(dec_depth) else "?"
-        lines.append(
-            f"  -> Decoder Stage {src_stage} [通道={feat}, convs={depth_here}]"
-        )
-
-    lines.append(f"  -> Seg Head [输出通道={num_output_channels}]")
-    if enable_deep_supervision:
-        lines.append("  -> Deep Supervision Heads [开启]")
-    else:
-        lines.append("  -> Deep Supervision Heads [关闭]")
-    return "\n".join(lines)
 
 
 def build_network_section_markdown(title: str, label: str, network: torch.nn.Module) -> str:
@@ -300,11 +489,23 @@ def make_plain_summary(
             enable_deep_supervision,
         ),
         "",
+        "[教学图：一眼看懂版]",
+        build_teaching_flow_text(
+            configuration_manager,
+            num_input_channels,
+            num_output_channels,
+            enable_deep_supervision,
+        ),
+        "",
         "[network_arch_init_kwargs]",
         arch_kwargs_text,
         "",
         "[network_arch_init_kwargs_req_import]",
         req_import_text,
+        "",
+        "[说明]",
+        "- 上面的维度变化是根据 plans 里的 stride / patch_size 推算出来的整体流向图。",
+        "- Decoder 部分展示的是空间尺寸如何变化，方便你定位该在哪一层插模块。",
         "",
     ]
 
@@ -349,18 +550,20 @@ def make_markdown_summary(
         "# 模型检查报告",
         "",
         "## 基础信息",
-        f"- plans 路径: `{plans_path}`",
-        f"- dataset.json 路径: `{dataset_json_path}`" if dataset_json_path is not None else "- dataset.json 路径: `未提供`",
-        f"- trainer: `{trainer_name}`",
-        f"- configuration: `{configuration_name}`",
-        f"- patch_size: `{configuration_manager.patch_size}`",
-        f"- spacing: `{configuration_manager.spacing}`",
-        f"- network_arch_class_name: `{configuration_manager.network_arch_class_name}`",
-        f"- num_input_channels: `{num_input_channels}`",
-        f"- num_output_channels: `{num_output_channels}`",
-        f"- enable_deep_supervision: `{enable_deep_supervision}`",
+        build_basic_info_markdown_table(
+            plans_path,
+            dataset_json_path,
+            trainer_name,
+            configuration_name,
+            configuration_manager,
+            num_input_channels,
+            num_output_channels,
+            enable_deep_supervision,
+        ),
         "",
         "## plans 级骨架示意",
+        "> 这一部分是按 plans 推出来的结构流向图，重点看每个模块前后 shape 怎么变。",
+        "",
         "```text",
         build_plans_ascii_diagram(
             configuration_manager,
@@ -369,6 +572,36 @@ def make_markdown_summary(
             enable_deep_supervision,
         ),
         "```",
+        "",
+        "## 教学图：一眼看懂版",
+        "> 这一部分更像讲义，适合先快速理解网络大框架，再去看底下的完整模型树。",
+        "",
+        build_teaching_flow_markdown(
+            configuration_manager,
+            num_input_channels,
+            num_output_channels,
+            enable_deep_supervision,
+        ),
+        "",
+        "## 教学图：Mermaid 版",
+        "> 如果你的 Markdown 预览支持 Mermaid，这一段会渲染成真正的流程图。",
+        "",
+        "```mermaid",
+        build_mermaid_diagram(
+            configuration_manager,
+            num_input_channels,
+            num_output_channels,
+            enable_deep_supervision,
+        ),
+        "```",
+        "",
+        "## plans 级维度变化表",
+        build_plans_markdown_table(
+            configuration_manager,
+            num_input_channels,
+            num_output_channels,
+            enable_deep_supervision,
+        ),
         "",
         "## network_arch_init_kwargs",
         "```python",
