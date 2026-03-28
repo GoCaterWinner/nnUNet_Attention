@@ -8,73 +8,7 @@ from nnunetv2.training.nnUNetTrainer.nnUNetTrainer import nnUNetTrainer
 from nnunetv2.utilities.ccc_metric import compute_ccc
 from nnunetv2.utilities.hd95_metric import compute_hd95
 
-# Attnetion0rLinearPlaceHolder教你插拔模块大概怎么写，看这里！！！
 
-class AttentionOrLinearPlaceHolder(nn.Module):
-    """
-
-    ----------这个是你创新点的主要来源----------
-    我推荐你做的，什么维度进来，什么维度出来，这样子可插拔性极强。
-    -(B,C,H,W)进来，-(B,C,H,W)出来，直接卷积加注意力
-    -(B,N,C)进来，-(B,N,C)出来，直接线性层加注意力
-    -(B,C)进来，-(B,C)出来，直接线性层加注意力
-    ---------就相当于你在中间给维度变来变去-------
-
-    这个类的 `pass` 是故意保留的，因为它只是一个模板，不参与当前训练。
-
-    这里作为一个“教学模块”，就是给你看看大概是怎么写的，我们底下有专门的模块
-    你在底下写就行，这里做一个实例。
-    """
-
-    def __init__(self, in_features: int, hidden_features: int, out_features: int):
-        """
-        参数说明
-        ----------
-        in_features:
-            输入特征维度。
-            如果你前面已经把卷积特征展平成 token 或向量，这里通常对应最后一维大小。
-
-        hidden_features:
-            中间隐层维度。
-            如果你想做两层 MLP、门控单元或者 attention 前后的投影，这通常是中间通道数。
-
-        out_features:
-            输出特征维度。
-            一般需要和后续模块能对上，比如回到原通道数，或者投影到新的 embedding 维度。
-        """
-        super().__init__()
-
-        # 以后你可以按下面这种形式真正实现:
-        #
-        # self.fc1 = nn.Linear(in_features, hidden_features)
-        # self.act = nn.GELU()
-        # self.fc2 = nn.Linear(hidden_features, out_features)
-        #
-        # 或者:你做一个注意力机制
-        # self.attn = nn.MultiheadAttention(embed_dim=in_features, num_heads=8, batch_first=True)
-        # out,weight = attn(x,x,x)  # 这里的 x 就是输入特征，形状 (B,N,C)
-        #
-        pass
-
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        """
-        参数说明
-        ----------
-        x:
-            输入特征张量。形状完全取决于你自己的设计。
-            常见情况包括：
-            - `(B, N, C)`：token 序列
-            - `(B, C)`：全局池化后的向量
-            - `(B, C, H, W)` / `(B, C, D, H, W)`：卷积特征图
-
-        返回
-        ----------
-        torch.Tensor:
-            你的模块处理后的结果。
-
-        这里保留 `pass`，表示“等你真正实现时再填”。
-        """
-        pass
 
 
 # MyTrainer_Attention 你可以改成你想要的名字，最后记得训练或者啥的时候，带上-tr XXXX（新名字）
@@ -82,23 +16,16 @@ class AttentionOrLinearPlaceHolder(nn.Module):
 class MyTrainer_Attention(nnUNetTrainer):
 
     """
+    这是一个nnUNetTrainer的子类。
+    我来介绍我们现在要做的事情。你听说过“缝合模块”吧，就是那种你不改原来网络结构，直接在某一层的输出上缝合一个新的模块，。
 
-    这是一个给“模型层二次开发”准备的 trainer 模板。也是nnUNet这个网络默认的合法渠道。
-    nnUNet这个网络的模型可以用两种方法修改。
-    1- 直接改网络大概，因为它的网络来自于pip库，所以你不好修改是第一，作者一更新就完蛋（不推荐）
-    2- 在这个MyTrainer_Attention里面进行修改，这个我很推荐，简单易用，还不随版本更新更迭。
+    nnUNet的特点是它是根据你的数据集创造一个你专有的模型,但是这个模型是隐形的,你看不见,不像很简单的代码里,有一个model.py
+    所以我做了一个inspect_plans_models.py,你在这里面可以根据数据预处理的结果,看出nnUNet给你的模型长啥样,你就可以针对性的改.
 
-    上面的AttentionOrLinearPlaceHolder是一个教学实例模块，MyTrainer_Attention是一个训练器
-
-    何谓训练器？也就是里面既有网络呀，也有你loss选什么，优化器optimizer选什么，
-    训练步骤train_step怎么写，验证步骤validation_step怎么写，指标怎么写等等等的一个集合体。
-    你可以在这个MyTrainer_Attention里面改网络，改loss，改优化器，改训练步骤，改验证步骤，改指标等等等。
-
-    具体改造的教程看每个def，我都给你写好了，怎么改。
-
+    MyTrainer_Attention是一个训练器,所谓训练器,意思很简单,就是有模型架构,loss啊,优化器啊,训练步骤...每个方法我都会给你写好注释.
     """
 
-    # 最初的初始化magicmethod，这个你不用动的哦。
+    # 这个魔法方法就是初始化参数，你不需要动就行啦
     def __init__(
         self,
         plans: dict,
@@ -145,41 +72,39 @@ class MyTrainer_Attention(nnUNetTrainer):
         -----------
         dataset_json:（这个你会碰到的，自己写的，里面就告诉你了一些基本信息）
             预处理目录中的 `dataset.json` 内容。
-            它会告诉 nnU-Net：
+            它会告诉 nnU-Net:
             - 谁是背景？
-            - 是不是CT？还是磁共振？
+            - 是不是CT?还是磁共振?
             - 有多少数据？
             基本就这些信息
         -----------
         device:（这个暂时无视掉）
             当前训练设备。
             常见是：
-            - `torch.device("cuda")`——如果你有 NVIDIA GPU，通常就是这个了。
-            - `torch.device("cpu")`——如果你没有 GPU，或者想在 CPU 上测试代码。
-            - `torch.device("mps")`——如果你有 Apple M1/M2/M3/M4/M5芯片，可以使用这个。
+            - `torch.device("cuda")`——如果你有 NVIDIA GPU,通常就是这个了。
+            - `torch.device("cpu")`——如果你没有 GPU,或者想在 CPU 上测试代码。
+            - `torch.device("mps")`——如果你有 Apple M1/M2/M3/M4/M5芯片,可以使用这个。
 
             父类还会根据 DDP 情况重新修正实际使用的 device。
         """
         super().__init__(plans, configuration, fold, dataset_json, device)
 
-        # 如果你的网络不是“多尺度输出列表”，而是只输出一个 segmentation logits 张量，
-        # 最稳妥的做法就是直接关闭 deep supervision。
-        # 这一点很重要，因为多尺度输出其实很麻烦！！！我推荐直接输出一个结果做预测就好了，毕竟你又不是非要和原版 nnU-Net 的架构完全一样。
+        # 有一个叫做enable_deep_supervision的成员变量，默认是True，也就是深监督，我并不推荐开启,如果你想开启，设置一下就行
         self.enable_deep_supervision = False
 
     # 改优化器和学习率调度器
     # 也就是这里也是一个重点
     def configure_optimizers(self):
         """
-        默认返回的是super（self，self）.configure_optimizers()，也就是父类 nnUNetTrainer 的优化器配置。
-        这里解释一下，super（self，self）其实就是MRO调用链
-        找nnUNetTrainer里面的configure_optimizers函数，直接拿来用就行了。
+        默认返回的是super(self,self).configure_optimizers()，也就是父类 nnUNetTrainer 的优化器配置。
+        这里解释一下,super(self,self)其实就是MRO调用链
+        找nnUNetTrainer里面的configure_optimizers函数,直接拿来用就行了。
         ----------
         
         ----------
-        这里默认会返回一个元祖，（optimizer，scheduler），其中：
-        - optimizer 优化器，也就是你天天看到的什么Adam啊，SGD啊
-        - scheduler 是一个学习率调度器对象，比如PolyLR，就是随着epoch增加，学习率逐渐降低的意思。
+        这里默认会返回一个元祖,(optimizer,scheduler)其中：
+        - optimizer 优化器,也就是你天天看到的什么Adam啊,SGD啊
+        - scheduler 是一个学习率调度器对象,比如PolyLR,就是随着epoch增加,学习率逐渐降低的意思。因为很少我们学习率会是固定不变的
         """
 
         # 要改的话很简单，右键configure_optimizers，转到定义
@@ -269,7 +194,7 @@ class MyTrainer_Attention(nnUNetTrainer):
         from nnunetv2.training.loss.dice import MemoryEfficientSoftDiceLoss
 
         # region-based segmentation任务是指，有的奇葩分类任务，可能一个像素点可能同时属于多个类别
-        # （比如脂肪分割里，可能既有“内脏脂肪”又有“皮下脂肪”），但是我们这个就是简单的二分类，不用担心
+        # （比如脂肪分割里，可能既有“内脏脂肪”又有“皮下脂肪”），但是我们脂肪分割这个就是简单的二分类，不用担心
         # 我为了保持原来的代码结构，还留了这个判断哈
         if self.label_manager.has_regions:
             from nnunetv2.training.loss.compound_losses import DC_and_BCE_loss
@@ -311,8 +236,8 @@ class MyTrainer_Attention(nnUNetTrainer):
 
         return loss
 
-    # staticmethod装饰器可以让你直接用MyTrainer_Attention.build_network_architecture(...)来调用这个函数，而不需要先实例化一个对象。 
-    # 这里参数比较多，我们慢慢看，这里就是你“搭建”网络骨架的地方，很重要哦！！！
+    # 这里虽然参数比较多，你可以选择看一下参数的函数，其实不看也没事，因为我已经将网络显性构建了，并且我也做了一个例子模块，你可以直接在我那里改
+    # 也就是问题我们转化成了”搭积木“问题。
     @staticmethod
     def build_network_architecture(
         architecture_class_name: str,
@@ -423,18 +348,23 @@ class MyTrainer_Attention(nnUNetTrainer):
         print("\narch_init_kwargs_req_import:", arch_init_kwargs_req_import)
 
         #———————————————————————————————看这里！！！！————————————————————————————————#
-        # 注意到我这里的UNetARTBlock签名没有进来的多，因为我觉得就这些就够用了。
+       
 
         from nnunetv2.training.my_archs.Net import YourNet
 
-        # 你的网络，这里就是你做自己的网络的地方啦。右键跳转过去，我们来看看网络怎么做
-        network = YourNet(
-            input_channels=num_input_channels,
-            num_class=num_output_channels,
-            deep_supervision=False,
-            **arch_init_kwargs, 
+        base_net = nnUNetTrainer.build_network_architecture(
+            architecture_class_name,
+            arch_init_kwargs,
+            arch_init_kwargs_req_import,
+            num_input_channels,
+            num_output_channels,
+            enable_deep_supervision=False,  # 这里直接关掉深监督了，毕竟我们这个网络不太适合多尺度输出，不关闭的话，就把=False改成enable_deep_supervision
         )
-        return network
+
+        # 对着YourNet右键，“跳转到定义”，跳转到我们的YourNet那里，里面我写了具体怎么进行修改模块。
+        Net = YourNet(base_net=base_net)
+        return Net
+
 
     # ————————————————————————————底下别动了，指标我都基本帮你写好了————————————————————————————————#
     def validation_step(self, batch: dict) -> dict:

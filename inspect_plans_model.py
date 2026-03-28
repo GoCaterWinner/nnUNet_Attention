@@ -12,8 +12,8 @@ from nnunetv2.training.nnUNetTrainer.nnUNetTrainer import nnUNetTrainer
 from nnunetv2.utilities.label_handling.label_handling import determine_num_input_channels
 from nnunetv2.utilities.plans_handling.plans_handler import PlansManager
 
-
-"""
+# 看这里哦！！！我在这里给你准备了一个可视化小模版！！
+""" 
     我准备好的，可视化界面，nnUNet这个奇葩网络，很复杂很复杂很复杂。
     它有一个特点，不像我们以前看的那种简单模型，那种简单的模型，一般有一个model.py,里面写好了个各种代码啊，啥的，你在里面直接把人家的删除，再改成你的，就ok了。
     但是这个不一样，nnUNet的模型是怎么来的？我来简单梳理一下哈：

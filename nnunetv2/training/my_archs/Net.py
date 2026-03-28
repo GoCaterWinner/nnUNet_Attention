@@ -1,57 +1,79 @@
 import torch
 import torch.nn as nn
+# 在这里给import过来
+from nnunetv2.training.my_archs.MyBlock import MyBlock,WrappedStage
 
-# 这个纯属没办法，nnUNetTrainer默认你的网络必须有个decoder属性，而decoder里面有个deep_supervision属性。
-# 如果没有的话它就会报错，所以我们就加个假的decoder和deep_supervision属性，来让它不报错。
-class _DecoderShim:
-    """
 
-    nnU-Net 的训练脚本有时会试图访问 `network.decoder.deep_supervision`，
-    为了防止其因为找不到属性而报错，我们在这里加上一个兼容垫片(Shim)。
-    这东西一定要留着，不然到时候网络接口没办法对齐
-    """
-    def __init__(self, deep_supervision=True):
-        self.deep_supervision = deep_supervision
+# 看这里！！这里就可以开始修改我们的某一层，也就是你熟知的“替换模块”或者说当”学术裁缝“了。
+# 我们要做的事情，就是把原来的nnUNet为我们做好的网络拿过来，把其中的某一层或者多个层（论文中一般有ablation，所以我们可以采用堆工作量，2-3个modules）替换掉。
+# 别担心，我在这里会给出具体的演示方法的，到时候你可以按照我的这个方法，进行替换即可。
 
-# 这里介绍一下几个输入，有点不一样的。
-# nnUNet有四种模式，2d，3d_fullres，3d_lowres。2d的输入是(B, C, H, W)
-# 3d_fullres的输入是(B, C, D, H, W)，3d_lowres的输入也是(B, C, D, H, W)，但是D通常比较小。
+# 假如我们关掉深监督
+# 注意！！！这套逻辑针对我们的3d fullres，如果你换2d的，最好把逻辑换成conv2d，但是为了好的性能，3d的其实很不错了。
 class YourNet(nn.Module):
+
+    
     """
-
-    这是一个示例网络，展示了如何构建一个符合 nnU-Net 的网络架构
-    首先，如果你做3D的，输入是（B, C, D, H, W），如果是2D的，输入是（B, C, H, W）。
-
+    模块流向图
+----------------------------------------------------------------------------------------
+Input              | (B, 1, 96, 160, 160)
+                   | 输入 patch
+Encoder Stage 0    | (B, 1, 96, 160, 160) --> (B, 32, 96, 160, 160)
+                   | kernel=[3, 3, 3], stride=[1, 1, 1], blocks/convs=2
+Encoder Stage 1    | (B, 32, 96, 160, 160) --> (B, 64, 48, 80, 80)
+                   | kernel=[3, 3, 3], stride=[2, 2, 2], blocks/convs=2
+Encoder Stage 2    | (B, 64, 48, 80, 80) --> (B, 128, 24, 40, 40)
+                   | kernel=[3, 3, 3], stride=[2, 2, 2], blocks/convs=2
+Encoder Stage 3    | (B, 128, 24, 40, 40) --> (B, 256, 12, 20, 20)
+                   | kernel=[3, 3, 3], stride=[2, 2, 2], blocks/convs=2
+Encoder Stage 4    | (B, 256, 12, 20, 20) --> (B, 320, 6, 10, 10)
+                   | kernel=[3, 3, 3], stride=[2, 2, 2], blocks/convs=2
+Bottleneck         | (B, 320, 6, 10, 10) --> (B, 320, 6, 5, 5)
+                   | kernel=[3, 3, 3], stride=[1, 2, 2], blocks/convs=2
+Decoder Stage 4    | spatial [6, 5, 5] --> [6, 10, 10]
+                   | 输出通道=320, upsample=[1, 2, 2], convs=2
+Decoder Stage 3    | spatial [6, 10, 10] --> [12, 20, 20]
+                   | 输出通道=256, upsample=[2, 2, 2], convs=2
+Decoder Stage 2    | spatial [12, 20, 20] --> [24, 40, 40]
+                   | 输出通道=128, upsample=[2, 2, 2], convs=2
+Decoder Stage 1    | spatial [24, 40, 40] --> [48, 80, 80]
+                   | 输出通道=64, upsample=[2, 2, 2], convs=2
+Decoder Stage 0    | spatial [48, 80, 80] --> [96, 160, 160]
+                   | 输出通道=32, upsample=[2, 2, 2], convs=2
+Seg Head           | (B, 32, 96, 160, 160) --> (B, 2, 96, 160, 160)
+                   | 分割输出头
+Deep Supervision   | enabled
+                   | 多尺度监督开关
+```
     """
-    # 虽然默认值是 True，但是deep_supervision之前已经关闭掉了。
-    # input_channels 是 nnU-Net 传入的参数，代表输入图像的通道数，比如CT通常是1，RGB图像是3。
-    # num_class 是 nnU-Net 传入的参数，代表最终输出的类别数，比如二分类是2，多分类可能是4、5等。
+    
+    # 接下来请跳转到./nnunetv2/training/my_archs/MyBlock.py，我在那里写了如何建立模块进行替换的教程
 
-    # **kwarg是字典型占位参数，就比如我举个例子哈。你调用YourNet（input_channels=1,num_class=2,deep_supervision=True,foo=123,bar='abc'）.
-    # 那么kwargs就会打包出一个字典kwargs = {'foo': 123, 'bar': 'abc'}，这就很方便，比如你想给网络增加一些牛逼的特性。
-    def __init__(self,input_channels:int,num_class:int,deep_supervision:bool = True,**kwargs):
-        super().__init__()
-        self.input_channels = input_channels
-        self.num_class = num_class
-        self.decoder = _DecoderShim(deep_supervision) # 垫片的作用，欺骗nnUNetTrainer
-        self.deep_supervision = False
 
-        # 我这里随便写一个比较简单的网络，大概你看一下意思，是这么搭建的，然后要改造的话，在我这个基础上改就行啦。
-        # nn.Sequential是一个容器，可以把一系列层按顺序组合成一个模块。你在里面放的层会按照你放的顺序依次执行,是我最推荐的.也是最容易理解的一种搭建方法
-        self.my_net = nn.Sequential(
-            nn.Conv3d(input_channels, 16, kernel_size=3, padding=1),  # 输入通道数，输出通道数，卷积核大小，填充
-            nn.ReLU(),
-            nn.Conv3d(16, 32, kernel_size=3, padding=1),
-            nn.Conv3d(32, num_class, kernel_size=1)  # 最后输出 num_class 个通道，代表每个类别的预测
-        )
-       
+    #————————————————————————————————————那里看完了不？继续————————————————————————————————————#
+
+    def __init__(self,base_net):
+        super().__init()
+        self.base_net = base_net
+
+        if hasattr(base_net,"decoder"):
+            self.decoder = base_net.decoder
+
+        # old_stage的作用来了哦！！
+        # 比如我现在想替换Encoder Stage 2
+        # 我之前做的可视化模型，里面记录着的列表，其实就是每一层的“名称”，拿到了名称，我们就可以制作替换层，从而达到替换模块的作用哦
+        old_stage1 = self.base_net.encoder.stages[2]
+        self.base_net.encoder.stages[2] = WrappedStage(old_stage=old_stage1, channels = 128)
+
+        # 比如我还要再改一层，举个例子哦，这次我要改底层bottleneck，它的名字不叫做bottleneck哦，叫做stages[-1]
+        # nnUNet是把底层算作encoder里面的，算最后一个
+        old_stage2 = self.base_net.encoder.stages[-1]
+        self.base_net.encoder.stages[-1] = WrappedStage(old_stage=old_stage2,channels = 320)
+        # 为什么是128？打开我们的model_summary.md，你仔细看，经过这一层，之后，模型是不是变成了128？（也许你的不一样，但是我的这个是这个哈哈哈）
+        # 也就是经过这个WrappedStage发生了这样一件事情，X ——> old——stage(也就是之前的第二层) ——> 你自己的模块MyBlock ——> out，这就完成了插拔模块。
 
     def forward(self,x):
+        return self.base_net(x)
 
-        # ok,这就是一个最小的可以跑通的单元
-        out = self.my_net(x)
-
-        return out
-
-
+# 经过这个后，你的模块就成功了哦，再 pip install -e .再安装一次（貌似也不需要，其实只是我的习惯啦），然后就可以训练了哦，这就是完整的实验流程！
 

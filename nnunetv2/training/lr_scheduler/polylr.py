@@ -1,6 +1,6 @@
 from torch.optim.lr_scheduler import _LRScheduler
 
-
+# 在这里改就行，你可以让AI改，AI改这个是很快的，但是记住哦，class PolyLRScheduler的源码给AI，因为签名是不能动的
 class PolyLRScheduler(_LRScheduler):
     def __init__(self, optimizer, initial_lr: float, max_steps: int, exponent: float = 0.9, current_step: int = None):
         self.optimizer = optimizer
