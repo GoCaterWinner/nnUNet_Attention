@@ -21,11 +21,13 @@ class MyBlock(nn.Module):
 class WrappedStage(nn.Module):
     def __init__(self,old_stage,channels):
         super().__init()
+        # old_stage的意思就是原来的模块
         self.old_stage = old_stage
         # 在这里给它实例化了
         self.my_block = MyBlock(channels)
 
     def forward(self,x):
+        # 这个代码的意思就是告诉你，我在原来的模块后面，接上了我自己的模块
         x = self.old_stage(x)
         x = self.my_block(x)
         return x
