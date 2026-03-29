@@ -215,39 +215,31 @@ def run_training_entry():
     import argparse
     parser = argparse.ArgumentParser()
     parser.add_argument('dataset_name_or_id', type=str,
-                        help="Dataset name or ID to train with")
+                        help="要用于训练的数据集名称或 ID")
     parser.add_argument('configuration', type=str,
-                        help="Configuration that should be trained")
+                        help="要训练的 configuration")
     parser.add_argument('fold', type=str,
-                        help='Fold of the 5-fold cross-validation. Should be an int between 0 and 4.')
+                        help='5 折交叉验证中的 fold。应为 0 到 4 之间的整数。')
     parser.add_argument('-tr', type=str, required=False, default='nnUNetTrainer',
-                        help='[OPTIONAL] Use this flag to specify a custom trainer. Default: nnUNetTrainer')
+                        help='[可选] 用这个参数指定自定义 trainer。默认：nnUNetTrainer')
     parser.add_argument('-p', type=str, required=False, default='nnUNetPlans',
-                        help='[OPTIONAL] Use this flag to specify a custom plans identifier. Default: nnUNetPlans')
+                        help='[可选] 用这个参数指定自定义 plans 标识符。默认：nnUNetPlans')
     parser.add_argument('-pretrained_weights', type=str, required=False, default=None,
-                        help='[OPTIONAL] path to nnU-Net checkpoint file to be used as pretrained model. Will only '
-                             'be used when actually training. Beta. Use with caution.')
+                        help='[可选] 作为预训练模型使用的 nnU-Net checkpoint 文件路径。只有在真正训练时才会使用。该功能仍属测试性质，请谨慎使用。')
     parser.add_argument('-num_gpus', type=int, default=1, required=False,
-                        help='Specify the number of GPUs to use for training')
+                        help='指定训练时使用的 GPU 数量')
     parser.add_argument('--npz', action='store_true', required=False,
-                        help='[OPTIONAL] Save softmax predictions from final validation as npz files (in addition to predicted '
-                             'segmentations). Needed for finding the best ensemble.')
+                        help='[可选] 在最终验证时额外保存 softmax 预测为 npz 文件（除了分割结果之外）。寻找最佳集成时会用到。')
     parser.add_argument('--c', action='store_true', required=False,
-                        help='[OPTIONAL] Continue training from latest checkpoint')
+                        help='[可选] 从最新 checkpoint 继续训练')
     parser.add_argument('--val', action='store_true', required=False,
-                        help='[OPTIONAL] Set this flag to only run the validation. Requires training to have finished.')
+                        help='[可选] 只运行验证。要求训练已经结束。')
     parser.add_argument('--val_best', action='store_true', required=False,
-                        help='[OPTIONAL] If set, the validation will be performed with the checkpoint_best instead '
-                             'of checkpoint_final. NOT COMPATIBLE with --disable_checkpointing! '
-                             'WARNING: This will use the same \'validation\' folder as the regular validation '
-                             'with no way of distinguishing the two!')
+                        help='[可选] 如果设置此参数，则使用 checkpoint_best 而不是 checkpoint_final 做验证。与 --disable_checkpointing 不兼容！警告：这会和常规验证共用同一个 validation 文件夹，二者无法区分。')
     parser.add_argument('--disable_checkpointing', action='store_true', required=False,
-                        help='[OPTIONAL] Set this flag to disable checkpointing. Ideal for testing things out and '
-                             'you dont want to flood your hard drive with checkpoints.')
+                        help='[可选] 禁用 checkpoint 保存。适合测试时使用，避免硬盘里堆太多 checkpoint。')
     parser.add_argument('-device', type=str, default='cuda', required=False,
-                    help="Use this to set the device the training should run with. Available options are 'cuda' "
-                         "(GPU), 'cpu' (CPU) and 'mps' (Apple M1/M2). Do NOT use this to set which GPU ID! "
-                         "Use CUDA_VISIBLE_DEVICES=X nnUNetv2_train [...] instead!")
+                    help="用这个参数设置训练设备。可选值有 'cuda'（GPU）、'cpu'（CPU）和 'mps'（Apple M1/M2）。不要用它来指定 GPU 编号！如果要指定 GPU，请使用 CUDA_VISIBLE_DEVICES=X nnUNetv2_train [...]。")
     args = parser.parse_args()
 
     assert args.device in ['cpu', 'cuda', 'mps'], f'-device must be either cpu, mps or cuda. Other devices are not tested/supported. Got: {args.device}.'

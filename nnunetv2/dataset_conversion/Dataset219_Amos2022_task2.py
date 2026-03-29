@@ -53,13 +53,10 @@ if __name__ == '__main__':
     import argparse
     parser = argparse.ArgumentParser()
     parser.add_argument('input_folder', type=str,
-                        help="The downloaded and extracted AMOS2022 (https://amos22.grand-challenge.org/) data. "
-                             "Use this link: https://zenodo.org/record/7262581."
-                             "You need to specify the folder with the imagesTr, imagesVal, labelsTr etc subfolders here!")
-    parser.add_argument('-d', required=False, type=int, default=219, help='nnU-Net Dataset ID, default: 219')
+                        help="已下载并解压的 AMOS2022（https://amos22.grand-challenge.org/）数据。可从 https://zenodo.org/record/7262581 获取。这里需要填写包含 imagesTr、imagesVal、labelsTr 等子文件夹的目录！")
+    parser.add_argument('-d', required=False, type=int, default=219, help='nnU-Net 数据集 ID，默认：219')
     args = parser.parse_args()
     amos_base = args.input_folder
     convert_amos_task2(amos_base, args.d)
 
     # /home/isensee/Downloads/amos22/amos22/
-

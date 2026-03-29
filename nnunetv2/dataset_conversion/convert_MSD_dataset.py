@@ -116,13 +116,11 @@ def convert_msd_dataset(source_folder: str, overwrite_target_id: Optional[int] =
 def entry_point():
     parser = argparse.ArgumentParser()
     parser.add_argument('-i', type=str, required=True,
-                        help='Downloaded and extracted MSD dataset folder. CANNOT be nnUNetv1 dataset! Example: '
-                             '/home/fabian/Downloads/Task05_Prostate')
+                        help='已下载并解压的 MSD 数据集文件夹。不能是 nnUNetv1 数据集！例如：/home/fabian/Downloads/Task05_Prostate')
     parser.add_argument('-overwrite_id', type=int, required=False, default=None,
-                        help='Overwrite the dataset id. If not set we use the id of the MSD task (inferred from '
-                             'folder name). Only use this if you already have an equivalently numbered dataset!')
+                        help='覆盖数据集 ID。如果不设置，则使用 MSD 任务自带的 ID（从文件夹名推断）。只有在你已经有同编号数据集时才建议使用！')
     parser.add_argument('-np', type=int, required=False, default=default_num_processes,
-                        help=f'Number of processes used. Default: {default_num_processes}')
+                        help=f'使用的进程数。默认：{default_num_processes}')
     args = parser.parse_args()
     convert_msd_dataset(args.i, args.overwrite_id, args.np)
 

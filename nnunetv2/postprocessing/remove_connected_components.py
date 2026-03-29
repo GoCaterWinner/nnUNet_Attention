@@ -296,18 +296,16 @@ def apply_postprocessing_to_folder(input_folder: str,
 
 def entry_point_determine_postprocessing_folder():
     parser = argparse.ArgumentParser('Writes postprocessing.pkl and postprocessing.json in input_folder.')
-    parser.add_argument('-i', type=str, required=True, help='Input folder')
-    parser.add_argument('-ref', type=str, required=True, help='Folder with gt labels')
+    parser.add_argument('-i', type=str, required=True, help='输入文件夹')
+    parser.add_argument('-ref', type=str, required=True, help='存放真实标注标签的文件夹')
     parser.add_argument('-plans_json', type=str, required=False, default=None,
-                        help="plans file to use. If not specified we will look for the plans.json file in the "
-                             "input folder (input_folder/plans.json)")
+                        help="要使用的 plans 文件。如果不指定，则会在输入文件夹中查找 plans.json（input_folder/plans.json）。")
     parser.add_argument('-dataset_json', type=str, required=False, default=None,
-                        help="dataset.json file to use. If not specified we will look for the dataset.json file in the "
-                             "input folder (input_folder/dataset.json)")
+                        help="要使用的 dataset.json 文件。如果不指定，则会在输入文件夹中查找 dataset.json（input_folder/dataset.json）。")
     parser.add_argument('-np', type=int, required=False, default=default_num_processes,
-                        help=f"number of processes to use. Default: {default_num_processes}")
+                        help=f"要使用的进程数。默认：{default_num_processes}")
     parser.add_argument('--remove_postprocessed', action='store_true', required=False,
-                        help='set this is you don\'t want to keep the postprocessed files')
+                        help='如果你不想保留后处理后的文件，就设置此参数')
 
     args = parser.parse_args()
     determine_postprocessing(args.i, args.ref, args.plans_json, args.dataset_json, args.np,
@@ -316,17 +314,15 @@ def entry_point_determine_postprocessing_folder():
 
 def entry_point_apply_postprocessing():
     parser = argparse.ArgumentParser('Apples postprocessing specified in pp_pkl_file to input folder.')
-    parser.add_argument('-i', type=str, required=True, help='Input folder')
-    parser.add_argument('-o', type=str, required=True, help='Output folder')
-    parser.add_argument('-pp_pkl_file', type=str, required=True, help='postprocessing.pkl file')
+    parser.add_argument('-i', type=str, required=True, help='输入文件夹')
+    parser.add_argument('-o', type=str, required=True, help='输出文件夹')
+    parser.add_argument('-pp_pkl_file', type=str, required=True, help='postprocessing.pkl 文件')
     parser.add_argument('-np', type=int, required=False, default=default_num_processes,
-                        help=f"number of processes to use. Default: {default_num_processes}")
+                        help=f"要使用的进程数。默认：{default_num_processes}")
     parser.add_argument('-plans_json', type=str, required=False, default=None,
-                        help="plans file to use. If not specified we will look for the plans.json file in the "
-                             "input folder (input_folder/plans.json)")
+                        help="要使用的 plans 文件。如果不指定，则会在输入文件夹中查找 plans.json（input_folder/plans.json）。")
     parser.add_argument('-dataset_json', type=str, required=False, default=None,
-                        help="dataset.json file to use. If not specified we will look for the dataset.json file in the "
-                             "input folder (input_folder/dataset.json)")
+                        help="要使用的 dataset.json 文件。如果不指定，则会在输入文件夹中查找 dataset.json（input_folder/dataset.json）。")
     args = parser.parse_args()
     pp_fns, pp_fn_kwargs = load_pickle(args.pp_pkl_file)
     apply_postprocessing_to_folder(args.i, args.o, pp_fns, pp_fn_kwargs, args.plans_json, args.dataset_json, args.np)

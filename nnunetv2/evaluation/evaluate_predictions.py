@@ -246,17 +246,17 @@ def compute_metrics_on_folder_simple(folder_ref: str, folder_pred: str, labels: 
 def evaluate_folder_entry_point():
     import argparse
     parser = argparse.ArgumentParser()
-    parser.add_argument('gt_folder', type=str, help='folder with gt segmentations')
-    parser.add_argument('pred_folder', type=str, help='folder with predicted segmentations')
+    parser.add_argument('gt_folder', type=str, help='存放真实标注分割结果的文件夹')
+    parser.add_argument('pred_folder', type=str, help='存放预测分割结果的文件夹')
     parser.add_argument('-djfile', type=str, required=True,
-                        help='dataset.json file')
+                        help='dataset.json 文件')
     parser.add_argument('-pfile', type=str, required=True,
-                        help='plans.json file')
+                        help='plans.json 文件')
     parser.add_argument('-o', type=str, required=False, default=None,
-                        help='Output file. Optional. Default: pred_folder/summary.json')
+                        help='输出文件路径。可选。默认：pred_folder/summary.json')
     parser.add_argument('-np', type=int, required=False, default=default_num_processes,
-                        help=f'number of processes used. Optional. Default: {default_num_processes}')
-    parser.add_argument('--chill', action='store_true', help='dont crash if folder_pred does not have all files that are present in folder_gt')
+                        help=f'使用的进程数。可选。默认：{default_num_processes}')
+    parser.add_argument('--chill', action='store_true', help='如果 pred 文件夹缺少 gt 文件夹中的部分文件，也不要报错退出')
     args = parser.parse_args()
     compute_metrics_on_folder2(args.gt_folder, args.pred_folder, args.djfile, args.pfile, args.o, args.np, chill=args.chill)
 
@@ -264,17 +264,17 @@ def evaluate_folder_entry_point():
 def evaluate_simple_entry_point():
     import argparse
     parser = argparse.ArgumentParser()
-    parser.add_argument('gt_folder', type=str, help='folder with gt segmentations')
-    parser.add_argument('pred_folder', type=str, help='folder with predicted segmentations')
+    parser.add_argument('gt_folder', type=str, help='存放真实标注分割结果的文件夹')
+    parser.add_argument('pred_folder', type=str, help='存放预测分割结果的文件夹')
     parser.add_argument('-l', type=int, nargs='+', required=True,
-                        help='list of labels')
+                        help='标签列表')
     parser.add_argument('-il', type=int, required=False, default=None,
-                        help='ignore label')
+                        help='忽略标签')
     parser.add_argument('-o', type=str, required=False, default=None,
-                        help='Output file. Optional. Default: pred_folder/summary.json')
+                        help='输出文件路径。可选。默认：pred_folder/summary.json')
     parser.add_argument('-np', type=int, required=False, default=default_num_processes,
-                        help=f'number of processes used. Optional. Default: {default_num_processes}')
-    parser.add_argument('--chill', action='store_true', help='dont crash if folder_pred does not have all files that are present in folder_gt')
+                        help=f'使用的进程数。可选。默认：{default_num_processes}')
+    parser.add_argument('--chill', action='store_true', help='如果 pred 文件夹缺少 gt 文件夹中的部分文件，也不要报错退出')
 
     args = parser.parse_args()
     compute_metrics_on_folder_simple(args.gt_folder, args.pred_folder, args.l, args.o, args.np, args.il, chill=args.chill)

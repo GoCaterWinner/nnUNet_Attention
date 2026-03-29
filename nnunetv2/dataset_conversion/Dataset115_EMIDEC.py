@@ -50,10 +50,10 @@ if __name__ == "__main__":
     import argparse
 
     parser = argparse.ArgumentParser()
-    parser.add_argument("-i", "--input_dir", type=str, help="The EMIDEC dataset directory.")
-    parser.add_argument("-t", "--test_dir", type=str, help="The EMIDEC test set directory.")
+    parser.add_argument("-i", "--input_dir", type=str, help="EMIDEC 数据集目录。")
+    parser.add_argument("-t", "--test_dir", type=str, help="EMIDEC 测试集目录。")
     parser.add_argument(
-        "-d", "--dataset_id", required=False, type=int, default=115, help="nnU-Net Dataset ID, default: 115"
+        "-d", "--dataset_id", required=False, type=int, default=115, help="nnU-Net 数据集 ID，默认：115"
     )
     args = parser.parse_args()
     print("Converting...")

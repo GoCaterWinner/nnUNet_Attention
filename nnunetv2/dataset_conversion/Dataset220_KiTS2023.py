@@ -40,11 +40,10 @@ if __name__ == '__main__':
     import argparse
     parser = argparse.ArgumentParser()
     parser.add_argument('input_folder', type=str,
-                        help="The downloaded and extracted KiTS2023 dataset (must have case_XXXXX subfolders)")
-    parser.add_argument('-d', required=False, type=int, default=220, help='nnU-Net Dataset ID, default: 220')
+                        help="已下载并解压的 KiTS2023 数据集（必须包含 case_XXXXX 子文件夹）")
+    parser.add_argument('-d', required=False, type=int, default=220, help='nnU-Net 数据集 ID，默认：220')
     args = parser.parse_args()
     amos_base = args.input_folder
     convert_kits2023(amos_base, args.d)
 
     # /media/isensee/raw_data/raw_datasets/kits23/dataset
-

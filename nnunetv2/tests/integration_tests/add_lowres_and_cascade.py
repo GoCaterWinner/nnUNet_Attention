@@ -9,7 +9,7 @@ if __name__ == '__main__':
     import argparse
 
     parser = argparse.ArgumentParser()
-    parser.add_argument('-d', nargs='+', type=int, help='List of dataset ids')
+    parser.add_argument('-d', nargs='+', type=int, help='数据集 ID 列表')
     args = parser.parse_args()
 
     for d in args.d:

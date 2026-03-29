@@ -113,12 +113,11 @@ def ensemble_folders(list_of_input_folders: List[str],
 def entry_point_ensemble_folders():
     parser = argparse.ArgumentParser()
     parser.add_argument('-i', nargs='+', type=str, required=True,
-                        help='list of input folders')
-    parser.add_argument('-o', type=str, required=True, help='output folder')
+                        help='输入文件夹列表')
+    parser.add_argument('-o', type=str, required=True, help='输出文件夹')
     parser.add_argument('-np', type=int, required=False, default=default_num_processes,
-                        help=f"Numbers of processes used for ensembling. Default: {default_num_processes}")
-    parser.add_argument('--save_npz', action='store_true', required=False, help='Set this flag to store output '
-                                                                                'probabilities in separate .npz files')
+                        help=f"集成时使用的进程数。默认：{default_num_processes}")
+    parser.add_argument('--save_npz', action='store_true', required=False, help='设置此参数后，会把输出概率单独保存为 .npz 文件')
 
     args = parser.parse_args()
     ensemble_folders(args.i, args.o, args.save_npz, args.np)

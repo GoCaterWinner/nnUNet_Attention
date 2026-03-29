@@ -271,23 +271,21 @@ def dumb_trainer_config_plans_to_trained_models_dict(trainers: List[str], config
 
 def find_best_configuration_entry_point():
     parser = argparse.ArgumentParser()
-    parser.add_argument('dataset_name_or_id', type=str, help='Dataset Name or id')
+    parser.add_argument('dataset_name_or_id', type=str, help='数据集名称或 ID')
     parser.add_argument('-p', nargs='+', required=False, default=['nnUNetPlans'],
-                        help='List of plan identifiers. Default: nnUNetPlans')
+                        help='plans 标识符列表。默认：nnUNetPlans')
     parser.add_argument('-c', nargs='+', required=False, default=['2d', '3d_fullres', '3d_lowres', '3d_cascade_fullres'],
-                        help="List of configurations. Default: ['2d', '3d_fullres', '3d_lowres', '3d_cascade_fullres']")
+                        help="configuration 列表。默认：['2d', '3d_fullres', '3d_lowres', '3d_cascade_fullres']")
     parser.add_argument('-tr', nargs='+', required=False, default=['nnUNetTrainer'],
-                        help='List of trainers. Default: nnUNetTrainer')
+                        help='trainer 列表。默认：nnUNetTrainer')
     parser.add_argument('-np', required=False, default=default_num_processes, type=int,
-                        help='Number of processes to use for ensembling, postprocessing etc')
+                        help='用于集成、后处理等步骤的进程数')
     parser.add_argument('-f', nargs='+', type=int, default=(0, 1, 2, 3, 4),
-                        help='Folds to use. Default: 0 1 2 3 4')
+                        help='要使用的 folds。默认：0 1 2 3 4')
     parser.add_argument('--disable_ensembling', action='store_true', required=False,
-                        help='Set this flag to disable ensembling')
+                        help='设置此参数以禁用集成')
     parser.add_argument('--no_overwrite', action='store_true',
-                        help='If set we will not overwrite already ensembled files etc. May speed up consecutive '
-                             'runs of this command (why would you want to do that?) at the risk of not updating '
-                             'outdated results.')
+                        help='如果设置此参数，则不会覆盖已经生成的集成文件等。这样可能会加快连续多次运行该命令的速度，但也有可能保留过期结果。')
     args = parser.parse_args()
 
     model_dict = dumb_trainer_config_plans_to_trained_models_dict(args.tr, args.c, args.p)
@@ -301,19 +299,18 @@ def find_best_configuration_entry_point():
 def accumulate_crossval_results_entry_point():
     parser = argparse.ArgumentParser('Copies all predicted segmentations from the individual folds into one joint '
                                      'folder and evaluates them')
-    parser.add_argument('dataset_name_or_id', type=str, help='Dataset Name or id')
+    parser.add_argument('dataset_name_or_id', type=str, help='数据集名称或 ID')
     parser.add_argument('-c', type=str, required=True,
                         default='3d_fullres',
-                        help="Configuration")
+                        help="configuration 名称")
     parser.add_argument('-o', type=str, required=False, default=None,
-                        help="Output folder. If not specified, the output folder will be located in the trained " \
-                             "model directory (named crossval_results_folds_XXX).")
+                        help="输出文件夹。如果不指定，则默认放在训练模型目录下（文件夹名为 crossval_results_folds_XXX）。")
     parser.add_argument('-f', nargs='+', type=int, default=(0, 1, 2, 3, 4),
-                        help='Folds to use. Default: 0 1 2 3 4')
+                        help='要使用的 folds。默认：0 1 2 3 4')
     parser.add_argument('-p', type=str, required=False, default='nnUNetPlans',
-                        help='Plan identifier in which to search for the specified configuration. Default: nnUNetPlans')
+                        help='用于查找指定 configuration 的 plans 标识符。默认：nnUNetPlans')
     parser.add_argument('-tr', type=str, required=False, default='nnUNetTrainer',
-                        help='Trainer class. Default: nnUNetTrainer')
+                        help='trainer 类名。默认：nnUNetTrainer')
     args = parser.parse_args()
     trained_model_folder = get_output_folder(args.dataset_name_or_id, args.tr, args.p, args.c)
 

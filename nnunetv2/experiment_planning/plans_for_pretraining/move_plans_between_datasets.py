@@ -64,16 +64,13 @@ def move_plans_between_datasets(
 def entry_point_move_plans_between_datasets():
     parser = argparse.ArgumentParser()
     parser.add_argument('-s', type=str, required=True,
-                        help='Source dataset name or id')
+                        help='源数据集名称或 ID')
     parser.add_argument('-t', type=str, required=True,
-                        help='Target dataset name or id')
+                        help='目标数据集名称或 ID')
     parser.add_argument('-sp', type=str, required=True,
-                        help='Source plans identifier. If your plans are named "nnUNetPlans.json" then the '
-                             'identifier would be nnUNetPlans')
+                        help='源 plans 标识符。如果你的 plans 文件名是 "nnUNetPlans.json"，那么这里的标识符就是 nnUNetPlans')
     parser.add_argument('-tp', type=str, required=False, default=None,
-                        help='Target plans identifier. Default is None meaning the source plans identifier will '
-                             'be kept. Not recommended if the source plans identifier is a default nnU-Net identifier '
-                             'such as nnUNetPlans!!!')
+                        help='目标 plans 标识符。默认是 None，表示沿用源 plans 标识符。如果源标识符是 nnUNetPlans 这类默认 nnU-Net 标识符，则不推荐这么做！')
     args = parser.parse_args()
     move_plans_between_datasets(args.s, args.t, args.sp, args.tp)
 

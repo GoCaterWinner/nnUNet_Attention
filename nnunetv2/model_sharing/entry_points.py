@@ -22,7 +22,7 @@ def download_by_url():
                     "CAREFUL: This script will overwrite "
                     "existing models (if they share the same trainer class and plans as "
                     "the pretrained model.")
-    parser.add_argument("url", type=str, help='URL of the pretrained model')
+    parser.add_argument("url", type=str, help='预训练模型的 URL')
     args = parser.parse_args()
     url = args.url
     download_and_install_from_url(url)
@@ -32,7 +32,7 @@ def install_from_zip_entry_point():
     import argparse
     parser = argparse.ArgumentParser(
         description="Use this to install a zip file containing a pretrained model.")
-    parser.add_argument("zip", type=str, help='zip file')
+    parser.add_argument("zip", type=str, help='zip 文件')
     args = parser.parse_args()
     zip = args.zip
     install_model_from_zip_file(zip)
@@ -42,18 +42,18 @@ def export_pretrained_model_entry():
     import argparse
     parser = argparse.ArgumentParser(
         description="Use this to export a trained model as a zip file.")
-    parser.add_argument('-d', type=str, required=True, help='Dataset name or id')
-    parser.add_argument('-o', type=str, required=True, help='Output file name')
+    parser.add_argument('-d', type=str, required=True, help='数据集名称或 ID')
+    parser.add_argument('-o', type=str, required=True, help='输出文件名')
     parser.add_argument('-c', nargs='+', type=str, required=False,
                         default=('3d_lowres', '3d_fullres', '2d', '3d_cascade_fullres'),
-                        help="List of configuration names")
-    parser.add_argument('-tr', required=False, type=str, default='nnUNetTrainer', help='Trainer class')
-    parser.add_argument('-p', required=False, type=str, default='nnUNetPlans', help='plans identifier')
-    parser.add_argument('-f', required=False, nargs='+', type=str, default=(0, 1, 2, 3, 4), help='list of fold ids')
+                        help="configuration 名称列表")
+    parser.add_argument('-tr', required=False, type=str, default='nnUNetTrainer', help='trainer 类名')
+    parser.add_argument('-p', required=False, type=str, default='nnUNetPlans', help='plans 标识符')
+    parser.add_argument('-f', required=False, nargs='+', type=str, default=(0, 1, 2, 3, 4), help='fold ID 列表')
     parser.add_argument('-chk', required=False, nargs='+', type=str, default=('checkpoint_final.pth', ),
-                        help='Lis tof checkpoint names to export. Default: checkpoint_final.pth')
-    parser.add_argument('--not_strict', action='store_false', default=False, required=False, help='Set this to allow missing folds and/or configurations')
-    parser.add_argument('--exp_cv_preds', action='store_true', required=False, help='Set this to export the cross-validation predictions as well')
+                        help='要导出的 checkpoint 文件名列表。默认：checkpoint_final.pth')
+    parser.add_argument('--not_strict', action='store_false', default=False, required=False, help='设置此参数后，允许缺少部分 folds 和/或 configurations')
+    parser.add_argument('--exp_cv_preds', action='store_true', required=False, help='设置此参数后，同时导出交叉验证预测结果')
     args = parser.parse_args()
 
     export_pretrained_model(dataset_name_or_id=args.d, output_file=args.o, configurations=args.c, trainer=args.tr,

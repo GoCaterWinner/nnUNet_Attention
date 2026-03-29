@@ -248,21 +248,19 @@ def entry_point_generate_overlay():
     import argparse
     parser = argparse.ArgumentParser("Plots png overlays of the slice with the most foreground. Note that this "
                                      "disregards spacing information!")
-    parser.add_argument('-d', type=str, help="Dataset name or id", required=True)
-    parser.add_argument('-o', type=str, help="output folder", required=True)
+    parser.add_argument('-d', type=str, help="数据集名称或 ID", required=True)
+    parser.add_argument('-o', type=str, help="输出文件夹", required=True)
     parser.add_argument('-np', type=int, default=default_num_processes, required=False,
-                        help=f"number of processes used. Default: {default_num_processes}")
+                        help=f"使用的进程数。默认：{default_num_processes}")
     parser.add_argument('-channel_idx', type=int, default=0, required=False,
-                        help="channel index used (0 = _0000). Default: 0")
-    parser.add_argument('--use_raw', action='store_true', required=False, help="if set then we use raw data. else "
-                                                                               "we use preprocessed")
+                        help="使用的通道索引（0 = _0000）。默认：0")
+    parser.add_argument('--use_raw', action='store_true', required=False, help="如果设置此参数，则使用原始数据；否则使用预处理后的数据")
     parser.add_argument('-p', type=str, required=False, default='nnUNetPlans',
-                        help='plans identifier. Only used if --use_raw is not set! Default: nnUNetPlans')
+                        help='plans 标识符。仅在未设置 --use_raw 时使用。默认：nnUNetPlans')
     parser.add_argument('-c', type=str, required=False, default=None,
-                        help='configuration name. Only used if --use_raw is not set! Default: None = '
-                             '3d_fullres if available, else 2d')
+                        help='configuration 名称。仅在未设置 --use_raw 时使用。默认：None，即优先使用 3d_fullres，如果没有则使用 2d')
     parser.add_argument('-overlay_intensity', type=float, required=False, default=0.6,
-                        help='overlay intensity. Higher = brighter/less transparent')
+                        help='overlay 强度。值越大，图像越亮、越不透明')
 
 
     args = parser.parse_args()

@@ -780,47 +780,34 @@ def predict_entry_point_modelfolder():
                                                  'model. This is useful when the nnunet environment variables '
                                                  '(nnUNet_results) are not set.')
     parser.add_argument('-i', type=str, required=True,
-                        help='input folder. Remember to use the correct channel numberings for your files (_0000 etc). '
-                             'File endings must be the same as the training dataset!')
+                        help='输入文件夹。请记得使用正确的通道编号命名文件（如 _0000 等），文件后缀也必须和训练数据集保持一致！')
     parser.add_argument('-o', type=str, required=True,
-                        help='Output folder. If it does not exist it will be created. Predicted segmentations will '
-                             'have the same name as their source images.')
+                        help='输出文件夹。如果不存在会自动创建。预测得到的分割文件将与原始图像同名。')
     parser.add_argument('-m', type=str, required=True,
-                        help='Folder in which the trained model is. Must have subfolders fold_X for the different '
-                             'folds you trained')
+                        help='已训练模型所在的文件夹。里面必须包含你训练出的各个 fold_X 子文件夹。')
     parser.add_argument('-f', nargs='+', type=str, required=False, default=(0, 1, 2, 3, 4),
-                        help='Specify the folds of the trained model that should be used for prediction. '
-                             'Default: (0, 1, 2, 3, 4)')
+                        help='指定预测时要使用哪些 fold。默认：(0, 1, 2, 3, 4)')
     parser.add_argument('-step_size', type=float, required=False, default=0.5,
-                        help='Step size for sliding window prediction. The larger it is the faster but less accurate '
-                             'the prediction. Default: 0.5. Cannot be larger than 1. We recommend the default.')
+                        help='滑窗预测的步长。值越大，预测越快但精度可能越低。默认：0.5。不能大于 1，推荐使用默认值。')
     parser.add_argument('--disable_tta', action='store_true', required=False, default=False,
-                        help='Set this flag to disable test time data augmentation in the form of mirroring. Faster, '
-                             'but less accurate inference. Not recommended.')
-    parser.add_argument('--verbose', action='store_true', help="Set this if you like being talked to. You will have "
-                                                               "to be a good listener/reader.")
+                        help='设置此参数以关闭测试时镜像增强（TTA）。这样会更快，但推理精度可能下降，不推荐。')
+    parser.add_argument('--verbose', action='store_true', help="设置后会打印更多日志信息。")
     parser.add_argument('--save_probabilities', action='store_true',
-                        help='Set this to export predicted class "probabilities". Required if you want to ensemble '
-                             'multiple configurations.')
+                        help='设置后会额外导出预测类别的“概率”。如果你想对多个 configuration 做集成，这是必须的。')
     parser.add_argument('--continue_prediction', '--c', action='store_true',
-                        help='Continue an aborted previous prediction (will not overwrite existing files)')
+                        help='继续之前中断的预测流程（不会覆盖已有文件）')
     parser.add_argument('-chk', type=str, required=False, default='checkpoint_final.pth',
-                        help='Name of the checkpoint you want to use. Default: checkpoint_final.pth')
+                        help='要使用的 checkpoint 文件名。默认：checkpoint_final.pth')
     parser.add_argument('-npp', type=int, required=False, default=3,
-                        help='Number of processes used for preprocessing. More is not always better. Beware of '
-                             'out-of-RAM issues. Default: 3')
+                        help='预处理使用的进程数。不是越多越好，要注意内存不足的问题。默认：3')
     parser.add_argument('-nps', type=int, required=False, default=3,
-                        help='Number of processes used for segmentation export. More is not always better. Beware of '
-                             'out-of-RAM issues. Default: 3')
+                        help='分割结果导出使用的进程数。不是越多越好，要注意内存不足的问题。默认：3')
     parser.add_argument('-prev_stage_predictions', type=str, required=False, default=None,
-                        help='Folder containing the predictions of the previous stage. Required for cascaded models.')
+                        help='上一阶段预测结果所在的文件夹。级联模型需要提供。')
     parser.add_argument('-device', type=str, default='cuda', required=False,
-                        help="Use this to set the device the inference should run with. Available options are 'cuda' "
-                             "(GPU), 'cpu' (CPU) and 'mps' (Apple M1/M2). Do NOT use this to set which GPU ID! "
-                             "Use CUDA_VISIBLE_DEVICES=X nnUNetv2_predict [...] instead!")
+                        help="用这个参数设置推理设备。可选值有 'cuda'（GPU）、'cpu'（CPU）和 'mps'（Apple M1/M2）。不要用它来指定 GPU 编号！如果要指定 GPU，请使用 CUDA_VISIBLE_DEVICES=X nnUNetv2_predict [...]。")
     parser.add_argument('--disable_progress_bar', action='store_true', required=False, default=False,
-                        help='Set this flag to disable progress bar. Recommended for HPC environments (non interactive '
-                             'jobs)')
+                        help='设置后会关闭进度条。推荐在 HPC / 非交互式任务环境中使用。')
 
     print(
         "\n#######################################################################\nPlease cite the following paper "
@@ -874,62 +861,44 @@ def predict_entry_point():
                                                  'model. This is useful when the nnunet environment variables '
                                                  '(nnUNet_results) are not set.')
     parser.add_argument('-i', type=str, required=True,
-                        help='input folder. Remember to use the correct channel numberings for your files (_0000 etc). '
-                             'File endings must be the same as the training dataset!')
+                        help='输入文件夹。请记得使用正确的通道编号命名文件（如 _0000 等），文件后缀也必须和训练数据集保持一致！')
     parser.add_argument('-o', type=str, required=True,
-                        help='Output folder. If it does not exist it will be created. Predicted segmentations will '
-                             'have the same name as their source images.')
+                        help='输出文件夹。如果不存在会自动创建。预测得到的分割文件将与原始图像同名。')
     parser.add_argument('-d', type=str, required=True,
-                        help='Dataset with which you would like to predict. You can specify either dataset name or id')
+                        help='要用于预测的数据集，可以填写数据集名称或 ID。')
     parser.add_argument('-p', type=str, required=False, default='nnUNetPlans',
-                        help='Plans identifier. Specify the plans in which the desired configuration is located. '
-                             'Default: nnUNetPlans')
+                        help='plans 标识符。用于指定目标 configuration 所在的 plans。默认：nnUNetPlans')
     parser.add_argument('-tr', type=str, required=False, default='nnUNetTrainer',
-                        help='What nnU-Net trainer class was used for training? Default: nnUNetTrainer')
+                        help='训练时使用的是哪个 nnU-Net trainer 类。默认：nnUNetTrainer')
     parser.add_argument('-c', type=str, required=True,
-                        help='nnU-Net configuration that should be used for prediction. Config must be located '
-                             'in the plans specified with -p')
+                        help='用于预测的 nnU-Net configuration。该 configuration 必须位于 -p 指定的 plans 中。')
     parser.add_argument('-f', nargs='+', type=str, required=False, default=(0, 1, 2, 3, 4),
-                        help='Specify the folds of the trained model that should be used for prediction. '
-                             'Default: (0, 1, 2, 3, 4)')
+                        help='指定预测时要使用哪些 fold。默认：(0, 1, 2, 3, 4)')
     parser.add_argument('-step_size', type=float, required=False, default=0.5,
-                        help='Step size for sliding window prediction. The larger it is the faster but less accurate '
-                             'the prediction. Default: 0.5. Cannot be larger than 1. We recommend the default.')
+                        help='滑窗预测的步长。值越大，预测越快但精度可能越低。默认：0.5。不能大于 1，推荐使用默认值。')
     parser.add_argument('--disable_tta', action='store_true', required=False, default=False,
-                        help='Set this flag to disable test time data augmentation in the form of mirroring. Faster, '
-                             'but less accurate inference. Not recommended.')
-    parser.add_argument('--verbose', action='store_true', help="Set this if you like being talked to. You will have "
-                                                               "to be a good listener/reader.")
+                        help='设置此参数以关闭测试时镜像增强（TTA）。这样会更快，但推理精度可能下降，不推荐。')
+    parser.add_argument('--verbose', action='store_true', help="设置后会打印更多日志信息。")
     parser.add_argument('--save_probabilities', action='store_true',
-                        help='Set this to export predicted class "probabilities". Required if you want to ensemble '
-                             'multiple configurations.')
+                        help='设置后会额外导出预测类别的“概率”。如果你想对多个 configuration 做集成，这是必须的。')
     parser.add_argument('--continue_prediction', action='store_true',
-                        help='Continue an aborted previous prediction (will not overwrite existing files)')
+                        help='继续之前中断的预测流程（不会覆盖已有文件）')
     parser.add_argument('-chk', type=str, required=False, default='checkpoint_final.pth',
-                        help='Name of the checkpoint you want to use. Default: checkpoint_final.pth')
+                        help='要使用的 checkpoint 文件名。默认：checkpoint_final.pth')
     parser.add_argument('-npp', type=int, required=False, default=_getDefaultValue('nnUNet_npp', int, 3),
-                        help='Number of processes used for preprocessing. More is not always better. Beware of '
-                             'out-of-RAM issues. Default: 3')
+                        help='预处理使用的进程数。不是越多越好，要注意内存不足的问题。默认：3')
     parser.add_argument('-nps', type=int, required=False, default=_getDefaultValue('nnUNet_nps', int, 3),
-                        help='Number of processes used for segmentation export. More is not always better. Beware of '
-                             'out-of-RAM issues. Default: 3')
+                        help='分割结果导出使用的进程数。不是越多越好，要注意内存不足的问题。默认：3')
     parser.add_argument('-prev_stage_predictions', type=str, required=False, default=None,
-                        help='Folder containing the predictions of the previous stage. Required for cascaded models.')
+                        help='上一阶段预测结果所在的文件夹。级联模型需要提供。')
     parser.add_argument('-num_parts', type=int, required=False, default=1,
-                        help='Number of separate nnUNetv2_predict call that you will be making. Default: 1 (= this one '
-                             'call predicts everything)')
+                        help='你将要并行启动多少个独立的 nnUNetv2_predict 调用。默认：1（也就是这一条命令完成全部预测）。')
     parser.add_argument('-part_id', type=int, required=False, default=0,
-                        help='If multiple nnUNetv2_predict exist, which one is this? IDs start with 0 can end with '
-                             'num_parts - 1. So when you submit 5 nnUNetv2_predict calls you need to set -num_parts '
-                             '5 and use -part_id 0, 1, 2, 3 and 4. Simple, right? Note: You are yourself responsible '
-                             'to make these run on separate GPUs! Use CUDA_VISIBLE_DEVICES (google, yo!)')
+                        help='如果你同时运行多个 nnUNetv2_predict，这一条命令对应的是第几个。ID 从 0 开始，到 num_parts - 1 结束。比如你要提交 5 个预测任务，就设置 -num_parts 5，并分别使用 -part_id 0、1、2、3、4。注意：你需要自己保证这些任务跑在不同 GPU 上，可用 CUDA_VISIBLE_DEVICES 指定。')
     parser.add_argument('-device', type=str, default='cuda', required=False,
-                        help="Use this to set the device the inference should run with. Available options are 'cuda' "
-                             "(GPU), 'cpu' (CPU) and 'mps' (Apple M1/M2). Do NOT use this to set which GPU ID! "
-                             "Use CUDA_VISIBLE_DEVICES=X nnUNetv2_predict [...] instead!")
+                        help="用这个参数设置推理设备。可选值有 'cuda'（GPU）、'cpu'（CPU）和 'mps'（Apple M1/M2）。不要用它来指定 GPU 编号！如果要指定 GPU，请使用 CUDA_VISIBLE_DEVICES=X nnUNetv2_predict [...]。")
     parser.add_argument('--disable_progress_bar', action='store_true', required=False, default=False,
-                        help='Set this flag to disable progress bar. Recommended for HPC environments (non interactive '
-                             'jobs)')
+                        help='设置后会关闭进度条。推荐在 HPC / 非交互式任务环境中使用。')
 
     print(
         "\n#######################################################################\nPlease cite the following paper "
@@ -1055,5 +1024,4 @@ if __name__ == '__main__':
         [['/media/isensee/raw_data/nnUNet_raw/Dataset004_Hippocampus/imagesTs/hippocampus_002_0000.nii.gz'], ['/media/isensee/raw_data/nnUNet_raw/Dataset004_Hippocampus/imagesTs/hippocampus_005_0000.nii.gz']],
         '/home/isensee/temp/tmp', False, True, None
     )
-
 

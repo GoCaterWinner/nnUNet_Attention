@@ -95,10 +95,10 @@ if __name__ == "__main__":
         "-i",
         "--input_folder",
         type=str,
-        help="The downloaded ACDC dataset dir. Should contain extracted 'training' and 'testing' folders.",
+        help="已下载的 ACDC 数据集目录。里面应包含解压后的 'training' 和 'testing' 文件夹。",
     )
     parser.add_argument(
-        "-d", "--dataset_id", required=False, type=int, default=27, help="nnU-Net Dataset ID, default: 27"
+        "-d", "--dataset_id", required=False, type=int, default=27, help="nnU-Net 数据集 ID，默认：27"
     )
     args = parser.parse_args()
     print("Converting...")

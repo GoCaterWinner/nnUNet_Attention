@@ -63,8 +63,8 @@ if __name__ == '__main__':
     import argparse
     parser = argparse.ArgumentParser()
     parser.add_argument('input_folder', type=str,
-                        help="The downloaded and extracted autopet dataset (must have PETCT_XXX subfolders)")
-    parser.add_argument('-d', required=False, type=int, default=221, help='nnU-Net Dataset ID, default: 221')
+                        help="已下载并解压的 AutoPET 数据集（必须包含 PETCT_XXX 子文件夹）")
+    parser.add_argument('-d', required=False, type=int, default=221, help='nnU-Net 数据集 ID，默认：221')
     args = parser.parse_args()
     amos_base = args.input_folder
     convert_autopet(amos_base, args.d)

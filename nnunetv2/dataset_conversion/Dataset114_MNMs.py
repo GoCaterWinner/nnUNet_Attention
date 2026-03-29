@@ -148,40 +148,35 @@ if __name__ == "__main__":
         "--help",
         action="help",
         default=argparse.SUPPRESS,
-        help="MNMs conversion utility helper. This script can be used to convert MNMs data into the expected nnUNet "
-        "format. It can also be used to create additional custom splits, for explicitly training on combinations "
-        "of vendors A and B (see `--custom-splits`).\n"
-        "If you wish to generate the custom splits, run the following pipeline:\n\n"
-        "(1) Run `Dataset114_MNMs -i <raw_Data_dir>\n"
-        "(2) Run `nnUNetv2_plan_and_preprocess -d 114 --verify_dataset_integrity`\n"
-        "(3) Start training, but stop after initial splits are created: `nnUNetv2_train 114 2d 0`\n"
-        "(4) Re-run `Dataset114_MNMs`, with `-s True`.\n"
-        "(5) Re-run training.\n",
+        help="MNMs 转换工具说明。本脚本可将 MNMs 数据转换成 nnUNet 所需格式，也可以额外生成自定义 split，用于显式训练 vendor A 和 B 的不同组合（见 `--custom-splits`）。\n"
+        "如果你想生成这些自定义 split，请按下面流程执行：\n\n"
+        "(1) 运行 `Dataset114_MNMs -i <raw_Data_dir>`\n"
+        "(2) 运行 `nnUNetv2_plan_and_preprocess -d 114 --verify_dataset_integrity`\n"
+        "(3) 开始训练，但在初始 split 创建后先停下：`nnUNetv2_train 114 2d 0`\n"
+        "(4) 再次运行 `Dataset114_MNMs`，并设置 `-s True`\n"
+        "(5) 重新开始训练。\n",
     )
     parser.add_argument(
         "-i",
         "--input_folder",
         type=str,
         default="./data/M&Ms/OpenDataset/",
-        help="The downloaded MNMs dataset dir. Should contain a csv file, as well as Training, Validation and Testing "
-        "folders.",
+        help="已下载的 MNMs 数据集目录。里面应包含一个 csv 文件，以及 Training、Validation 和 Testing 文件夹。",
     )
     parser.add_argument(
         "-c",
         "--csv_file_name",
         type=str,
         default="211230_M&Ms_Dataset_information_diagnosis_opendataset.csv",
-        help="The csv file containing the dataset information.",
+        help="包含数据集信息的 csv 文件。",
     ),
-    parser.add_argument("-d", "--dataset_id", type=int, default=114, help="nnUNet Dataset ID.")
+    parser.add_argument("-d", "--dataset_id", type=int, default=114, help="nnUNet 数据集 ID。")
     parser.add_argument(
         "-s",
         "--custom_splits",
         type=bool,
         default=False,
-        help="Whether to append custom splits for training and testing on different vendors. If True, will create "
-        "splits for training on patients from vendors A, B or a mix of A and B. Splits are tested on a hold-out "
-        "validation sets of patients from A, B or A and B combined. See section 2.4 and table 3 from "
+        help="是否为不同 vendor 的训练与测试追加自定义 split。如果设为 True，会创建在 vendor A、vendor B 或 A+B 混合数据上训练的 split，并在对应的留出验证集上测试。详见论文第 2.4 节和表 3："
         "https://arxiv.org/abs/2011.07592 for more info.",
     )
 

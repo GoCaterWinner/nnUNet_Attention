@@ -21,7 +21,7 @@ if __name__ == '__main__':
     torch.set_num_interop_threads(1)
 
     parser = argparse.ArgumentParser()
-    parser.add_argument('-d', type=int, help='dataset id')
+    parser.add_argument('-d', type=int, help='数据集 ID')
     args = parser.parse_args()
     d = args.d
 
