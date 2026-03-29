@@ -211,6 +211,7 @@ def run_training(dataset_name_or_id: Union[str, int],
         nnunet_trainer.perform_actual_validation(export_validation_probabilities)
 
 # 这里有argparse，就是让你在终端输入东西的，我们输入dataset name，configuration本质上就是进入到这里面。
+# 在这里！！！
 def run_training_entry():
     import argparse
     parser = argparse.ArgumentParser()

@@ -20,7 +20,7 @@ class MyBlock(nn.Module):
 # 做一个包装层。
 class WrappedStage(nn.Module):
     def __init__(self,old_stage,channels):
-        super().__init()
+        super().__init__()
         # old_stage的意思就是原来的模块
         self.old_stage = old_stage
         # 在这里给它实例化了

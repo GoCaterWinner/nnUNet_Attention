@@ -53,7 +53,7 @@ Deep Supervision   | enabled
     #————————————————————————————————————那里看完了不？继续————————————————————————————————————#
 
     def __init__(self,base_net):
-        super().__init()
+        super().__init__()
         self.base_net = base_net
 
         if hasattr(base_net,"decoder"):
@@ -64,16 +64,16 @@ Deep Supervision   | enabled
         # 我之前做的可视化模型，里面记录着的列表，其实就是每一层的“名称”，拿到了名称，我们就可以制作替换层，从而达到替换模块的作用哦
         old_stage1 = self.base_net.encoder.stages[2]
         self.base_net.encoder.stages[2] = WrappedStage(old_stage=old_stage1, channels = 128)
+        # 为什么是128？打开我们的model_summary.md，你仔细看，经过这一层，之后，模型是不是变成了128？（也许你的不一样，但是我的这个是这个哈哈哈）
 
         # 比如我还要再改一层，举个例子哦，这次我要改底层bottleneck，它的名字不叫做bottleneck哦，叫做stages[-1]
         # nnUNet是把底层算作encoder里面的，算最后一个
         old_stage2 = self.base_net.encoder.stages[-1]
         self.base_net.encoder.stages[-1] = WrappedStage(old_stage=old_stage2,channels = 320)
-        # 为什么是128？打开我们的model_summary.md，你仔细看，经过这一层，之后，模型是不是变成了128？（也许你的不一样，但是我的这个是这个哈哈哈）
         # 也就是经过这个WrappedStage发生了这样一件事情，X ——> old——stage(也就是之前的第二层) ——> 你自己的模块MyBlock ——> out，这就完成了插拔模块。
 
     def forward(self,x):
         return self.base_net(x)
 
-# 经过这个后，你的模块就成功了哦，再 pip install -e .再安装一次（貌似也不需要，其实只是我的习惯啦），然后就可以训练了哦，这就是完整的实验流程！
+# 看到这里请继续看我给你的文档的底下部分，我画图给你解释一下。经过这个后，你的模块就成功了哦，再 pip install -e .再安装一次（貌似也不需要，其实只是我的习惯啦），然后就可以训练了哦，这就是完整的实验流程！
 
