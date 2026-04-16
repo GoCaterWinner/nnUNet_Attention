@@ -1,7 +1,7 @@
 import torch
 import torch.nn as nn
 # 在这里给import过来
-from nnunetv2.training.my_archs.MyBlock import MyBlock,WrappedStage
+from nnunetv2.training.my_archs.MyBlock import MyBlock,WrappedStage,TransformerBottleneck
 
 
 # 看这里！！这里就可以开始修改我们的某一层，也就是你熟知的“替换模块”或者说当”学术裁缝“了。
@@ -69,10 +69,11 @@ Deep Supervision   | enabled
         # 比如我还要再改一层，举个例子哦，这次我要改底层bottleneck，它的名字不叫做bottleneck哦，叫做stages[-1]
         # nnUNet是把底层算作encoder里面的，算最后一个
         old_stage2 = self.base_net.encoder.stages[-1]
-        self.base_net.encoder.stages[-1] = WrappedStage(old_stage=old_stage2,channels = 320)
+        self.base_net.encoder.stages[-1] = TransformerBottleneck(old_stage=old_stage2, channels = 320)
         # 也就是经过这个WrappedStage发生了这样一件事情，X ——> old——stage(也就是之前的第二层) ——> 你自己的模块MyBlock ——> out，这就完成了插拔模块。
 
     def forward(self,x):
+        
         return self.base_net(x)
 
 # 看到这里请继续看我给你的文档的底下部分，我画图给你解释一下。经过这个后，你的模块就成功了哦，再 pip install -e .再安装一次（貌似也不需要，其实只是我的习惯啦），然后就可以训练了哦，这就是完整的实验流程！
